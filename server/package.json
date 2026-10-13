@@ -7,8 +7,7 @@
   "scripts": {
     "start": "node --no-warnings=ExperimentalWarning src/index.js",
     "dev": "node --no-warnings=ExperimentalWarning --watch src/index.js",
-    "seed": "node --no-warnings=ExperimentalWarning src/seed.js",
-    "test": "node --no-warnings=ExperimentalWarning src/selftest.js"
+    "seed": "node --no-warnings=ExperimentalWarning src/seed.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
