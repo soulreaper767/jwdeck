@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { db, audit, plain } from '../db.js';
 import { requireRole, scopeRoot } from '../auth.js';
-import { loadTree, isWithin } from '../consol.js';
+import { loadTree, isWithin } from '../engine.js';
 import { h, bad, notFound } from './util.js';
 
 const r = Router();
@@ -75,11 +75,11 @@ r.put('/nodes/:id', requireRole('admin'), h((req) => {
 r.delete('/nodes/:id', requireRole('admin'), h((req) => {
   const id = Number(req.params.id);
   if (db.prepare('SELECT COUNT(*) c FROM nodes WHERE parent_id = ?').get(id).c) throw bad('Remove or move its children first');
-  if (db.prepare('SELECT COUNT(*) c FROM submissions WHERE company_id = ?').get(id).c) {
+  if (db.prepare('SELECT COUNT(*) c FROM reports WHERE company_id = ?').get(id).c) {
     throw bad('This company has figures on record. Deactivate it instead.');
   }
   if (db.prepare('SELECT COUNT(*) c FROM users WHERE node_id = ?').get(id).c) throw bad('Users are assigned to this node');
-  db.prepare('DELETE FROM company_lines WHERE company_id = ?').run(id);
+  for (const t of ['skus', 'company_setup', 'budget_annual', 'budget_month']) db.prepare(`DELETE FROM ${t} WHERE company_id = ?`).run(id);
   db.prepare('DELETE FROM nodes WHERE id = ?').run(id);
   audit(req.user.id, 'node.delete', 'node', id);
   return { ok: true };

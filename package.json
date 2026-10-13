@@ -4,12 +4,12 @@
   "private": true,
   "description": "JW Group consolidated financial reporting dashboard",
   "scripts": {
-    "setup": "npm install && npm --prefix server install && npm --prefix client install && npm --prefix server run seed",
+    "setup": "npm install && npm --prefix server install && npm --prefix client install && npm --prefix client run build && npm --prefix server run seed",
     "dev": "concurrently -n api,web -c blue,green \"npm --prefix server run dev\" \"npm --prefix client run dev\"",
     "build": "npm --prefix client run build",
     "start": "npm --prefix server start",
     "seed": "npm --prefix server run seed",
-    "reseed": "npm --prefix server run seed -- --reset"
+    "seed:demo": "npm --prefix server run seed:demo"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

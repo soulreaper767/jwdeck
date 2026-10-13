@@ -2,7 +2,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, getSettings } from '../db.js';
 import { sign, requireAuth } from '../auth.js';
-import { loadTree, pathOf } from '../consol.js';
+import { loadTree, pathOf } from '../engine.js';
 import { h, bad } from './util.js';
 
 const r = Router();

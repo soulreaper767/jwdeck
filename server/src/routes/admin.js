@@ -52,7 +52,7 @@ r.put('/users/:id', admin, h((req) => {
 }));
 
 // ---- settings
-const EDITABLE = ['group_name', 'group_currency', 'fiscal_year_start_month', 'weekly_due_days', 'monthly_due_days'];
+const EDITABLE = ['group_name', 'group_currency', 'fiscal_year_start_month', 'week_due_days'];
 r.get('/settings', h(() => { const s = getSettings(); delete s.jwt_secret; return s; }));
 r.put('/settings', admin, h((req) => {
   const b = req.body || {};

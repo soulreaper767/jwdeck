@@ -1,329 +1,296 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useApp } from '../store.jsx';
 import { api } from '../lib/api.js';
-import { parse, evaluate } from '../lib/formula.js';
-import { fmtPlain, variance } from '../lib/format.js';
-import { NodePicker, PeriodSelect, usePeriods } from '../components/ViewBar.jsx';
-import { Seg, Spinner, Status, Confirm, Modal } from '../components/ui.jsx';
+import { fv, vr, fpct, parseNum, plainNum, STATUS } from '../lib/format.js';
+import { NodeSelect, WeekSelect, Seg, Loading, Ask, Modal } from '../ui.jsx';
 
-const parseNum = (s) => {
-  if (s == null) return null;
-  let t = String(s).trim().replace(/,/g, '');
-  if (!t) return null;
-  let neg = false;
-  if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); }
-  const n = Number(t);
-  if (Number.isNaN(n)) return NaN;
-  return neg ? -n : n;
+const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const monthName = (m) => (m ? `${MN[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}` : '');
+
+const toStr = (d) => {
+  const v = {};
+  for (const [item, byM] of Object.entries(d.values || {})) for (const [m, x] of Object.entries(byM)) (v[item] ||= {})[m] = plainNum(x);
+  const a = {};
+  for (const [item, x] of Object.entries(d.adj || {})) a[item] = { value: plainNum(x.value), reason: x.reason || '' };
+  return { values: v, adj: a, notes: { ...(d.notes || {}) }, remarks: d.remarks || '' };
+};
+const toNum = (s) => {
+  const values = {};
+  for (const [item, byM] of Object.entries(s.values)) for (const [m, x] of Object.entries(byM)) { const n = parseNum(x); if (n != null && !Number.isNaN(n)) (values[item] ||= {})[m] = n; }
+  const adj = {};
+  for (const [item, x] of Object.entries(s.adj)) { const n = parseNum(x.value); if (n) adj[item] = { value: n, reason: x.reason }; }
+  return { values, adj, notes: s.notes, remarks: s.remarks };
 };
 
-function computeAll(lines, values) {
-  const byCode = new Map(lines.map((l) => [l.code, l]));
-  const out = new Map();
-  const visiting = new Set();
-  const calc = (l) => {
-    if (out.has(l.id)) return out.get(l.id);
-    if (visiting.has(l.id)) return null;
-    visiting.add(l.id);
-    let v = null;
-    if (l.line_type === 'input') { const n = parseNum(values[l.id]); v = n == null || Number.isNaN(n) ? null : n; }
-    else if (l.line_type === 'formula' && l.formula) {
-      try {
-        let any = false;
-        v = evaluate(parse(l.formula), (c) => { const r = byCode.get(c); const x = r ? calc(r) : null; if (x != null) any = true; return x; });
-        if (!any) v = null;
-      } catch { v = null; }
-    }
-    visiting.delete(l.id);
-    out.set(l.id, v);
-    return v;
+function Setup({ cid, onDone }) {
+  const { notify } = useApp();
+  const [info, setInfo] = useState(null);
+  const [week, setWeek] = useState('');
+  const [cash, setCash] = useState('');
+  useEffect(() => { api.get(`/companies/${cid}/setup`).then((r) => { setInfo(r); setWeek(r.setup?.start_week || r.suggested_start); setCash(plainNum(r.setup?.opening_cash)); }); }, [cid]);
+  if (!info) return <Loading />;
+  const save = async () => {
+    try { await api.put(`/companies/${cid}/setup`, { start_week: week, opening_cash: parseNum(cash) }); notify('Saved'); onDone(); } catch (e) { notify(e.message, 'err'); }
   };
-  lines.forEach(calc);
-  return out;
+  return (
+    <div className="box" style={{ maxWidth: 560 }}>
+      <h2 style={{ marginBottom: 10 }}>Opening position</h2>
+      <div className="row" style={{ alignItems: 'flex-end' }}>
+        <label className="f">First reporting week<WeekSelect value={week} onChange={setWeek} /></label>
+        <label className="f">Cash & bank at start of that week (PKR)<input className="n" value={cash} onChange={(e) => setCash(e.target.value)} onBlur={() => setCash(plainNum(parseNum(cash)))} style={{ width: 190 }} /></label>
+        <button className="dark" disabled={!info.can_edit_opening} onClick={save}>Save</button>
+      </div>
+      <div style={{ marginTop: 12 }} className="small">SKUs: {info.skus.filter((s) => s.active).map((s) => s.name).join(', ') || 'none'} · <Link to={`/companies?c=${cid}`}>edit</Link></div>
+    </div>
+  );
 }
 
 export default function Entry() {
   const params = useParams();
   const nav = useNavigate();
-  const { user, nodes, view, setView, canEnter, isAdmin, notify } = useApp();
-  const freq = params.freq || view.freq;
-  const periods = usePeriods(freq);
+  const { user, nodes, view, canEnter, notify, isAdmin } = useApp();
+  let cid = Number(params.cid) || null;
+  if (!cid) cid = user.role === 'company' ? user.node_id : [...nodes.values()].find((n) => n.type === 'company' && canEnter(n.id))?.id || null;
+  const week = params.week || view.week;
 
-  let companyId = Number(params.companyId) || null;
-  if (!companyId) {
-    if (user.role === 'company') companyId = user.node_id;
-    else {
-      const first = [...nodes.values()].find((n) => n.type === 'company' && n.active && canEnter(n.id));
-      companyId = first?.id || null;
-    }
-  }
-  const key = params.key || periods?.last_closed;
-
-  const [data, setData] = useState(null);
+  const [d, setD] = useState(null);
   const [err, setErr] = useState('');
-  const [values, setValues] = useState({});
-  const [notes, setNotes] = useState({});
-  const [remarks, setRemarks] = useState('');
+  const [s, setS] = useState(null);
+  const [pv, setPv] = useState(null);
+  const [month, setMonth] = useState(null);
+  const [openAdj, setOpenAdj] = useState(() => new Set());
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [confirm, setConfirm] = useState(null);
-  const [history, setHistory] = useState(null);
-  const inputs = useRef({});
-
-  const url = companyId && key ? `/entry/${companyId}/${freq}/${key}` : null;
+  const [ask, setAsk] = useState(null);
+  const [hist, setHist] = useState(null);
+  const refs = useRef({});
+  const timer = useRef(null);
+  const url = cid && week ? `/report/${cid}/${week}` : null;
 
   const load = useCallback(async () => {
     if (!url) return;
     setErr('');
     try {
       const r = await api.get(url);
-      setData(r);
-      const v = {};
-      for (const [k, x] of Object.entries(r.values)) v[k] = x == null ? '' : fmtPlain(x, Math.abs(x % 1) > 0 ? 2 : 0);
-      setValues(v);
-      setNotes(r.notes || {});
-      setRemarks(r.remarks || '');
+      setD(r);
+      setS(toStr(r.data));
+      setPv(r.preview);
+      setMonth((m) => (r.week.segments.some((x) => x.month === m) ? m : r.week.segments[r.week.segments.length - 1].month));
+      setOpenAdj(new Set([...Object.keys(r.data.adj || {}), ...Object.keys(r.data.notes || {})]));
       setDirty(false);
-    } catch (e) { setErr(e.message); setData(null); }
+    } catch (e) { setErr(e.message); setD(null); }
   }, [url]);
-
   useEffect(() => { load(); }, [load]);
 
-  const go = (cid, f, k) => {
-    if (dirty && !window.confirm('You have unsaved changes. Leave without saving?')) return;
-    if (f !== view.freq) setView({ freq: f });
-    nav(`/entry/${cid}/${f}/${k || ''}`.replace(/\/$/, ''));
+  const go = (c, w) => {
+    if (dirty && !window.confirm('Discard unsaved figures?')) return;
+    nav(`/enter/${c}/${w}`);
   };
 
-  const lines = data?.lines || [];
-  const computed = useMemo(() => computeAll(lines, values), [lines, values]);
-  const inputLines = lines.filter((l) => l.line_type === 'input');
-  const invalid = inputLines.filter((l) => Number.isNaN(parseNum(values[l.id])));
+  const change = (fn) => {
+    setS((cur) => {
+      const next = fn(structuredClone(cur));
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => { api.post(`${url}/preview`, toNum(next)).then(setPv).catch(() => {}); }, 350);
+      return next;
+    });
+    setDirty(true);
+  };
 
-  const payload = () => ({
-    values: inputLines.map((l) => ({ line_id: l.id, value: parseNum(values[l.id]), note: notes[l.id] || null })),
-    remarks,
-  });
+  const segs = d?.week.segments || [];
+  const inputCodes = useMemo(() => new Set((d?.lines || []).filter((l) => l.kind === 'input').map((l) => l.code)), [d]);
+  const noteCodes = useMemo(() => new Set((d?.lines || []).filter((l) => l.note_required).map((l) => l.code)), [d]);
+  const isInput = (code) => inputCodes.has(code) || /^SKU:\d+:(PQ|SQ|SV)$/.test(code);
+  const sections = pv?.[month] || null;
+  const order = useMemo(() => (sections ? sections.flatMap((x) => x.rows).filter((r) => r.code && isInput(r.code)).map((r) => r.code) : []), [sections]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
-    if (invalid.length) return notify(`Fix invalid numbers: ${invalid.map((l) => l.label).join(', ')}`, 'err');
     setBusy(true);
-    try { await api.put(url, payload()); notify('Draft saved'); await load(); } catch (e) { notify(e.message, 'err'); } finally { setBusy(false); }
+    try { await api.put(url, toNum(s)); notify('Saved'); setDirty(false); } catch (e) { notify(e.message, 'err'); } finally { setBusy(false); }
   };
   const file = async () => {
     setBusy(true);
-    try {
-      const r = await api.post(`${url}/file`, payload());
-      notify(`Filed and locked (revision ${r.revision})`);
-      await load();
-    } catch (e) { notify(e.message, 'err'); throw e; } finally { setBusy(false); }
+    try { const r = await api.post(`${url}/file`, toNum(s)); notify(`Filed · rev ${r.revision}`); await load(); } catch (e) { notify(e.message, 'err'); } finally { setBusy(false); }
   };
-  const reopen = async (reason) => {
-    try { await api.post(`${url}/reopen`, { reason }); notify('Reopened for correction'); await load(); } catch (e) { notify(e.message, 'err'); throw e; }
-  };
-  const showHistory = async () => setHistory(await api.get(`${url}/history`));
 
-  const setVal = (id, v) => { setValues((x) => ({ ...x, [id]: v })); setDirty(true); };
-  const onPaste = (e, idx) => {
-    const text = e.clipboardData.getData('text');
-    const parts = text.split(/\r?\n|\t/).map((s) => s.trim()).filter((s, i, a) => s !== '' || i < a.length - 1);
-    if (parts.length < 2) return;
+  const onKey = (e, code, m) => {
+    const segIdx = segs.findIndex((x) => x.month === m);
+    const i = order.indexOf(code);
+    const focus = (c2, m2) => refs.current[`${c2}|${m2}`]?.focus();
+    if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); if (order[i + 1]) focus(order[i + 1], m); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); if (order[i - 1]) focus(order[i - 1], m); }
+    if (e.key === 'ArrowRight' && segs[segIdx + 1] && e.target.selectionStart === e.target.value.length) focus(code, segs[segIdx + 1].month);
+    if (e.key === 'ArrowLeft' && segIdx > 0 && e.target.selectionStart === 0) focus(code, segs[segIdx - 1].month);
+  };
+  const onPaste = (e, code, m) => {
+    const parts = e.clipboardData.getData('text').split(/\r?\n/).filter((x, i, a) => x !== '' || i < a.length - 1);
+    if (parts.length < 2 && !parts[0]?.includes('\t')) return;
     e.preventDefault();
-    const next = { ...values };
-    parts.forEach((p, i) => { const l = inputLines[idx + i]; if (l) next[l.id] = p; });
-    setValues(next);
-    setDirty(true);
-    notify(`Pasted ${Math.min(parts.length, inputLines.length - idx)} values`);
-  };
-  const onKey = (e, idx) => {
-    if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); inputs.current[inputLines[idx + 1]?.id]?.focus(); }
-    if (e.key === 'ArrowUp') { e.preventDefault(); inputs.current[inputLines[idx - 1]?.id]?.focus(); }
+    const i = order.indexOf(code);
+    const si = segs.findIndex((x) => x.month === m);
+    change((st) => {
+      parts.forEach((line, k) => line.split('\t').forEach((cell, j) => {
+        const c2 = order[i + k];
+        const m2 = segs[si + j]?.month;
+        if (c2 && m2) (st.values[c2] ||= {})[m2] = cell.trim();
+      }));
+      return st;
+    });
   };
 
-  const companyPicker = (
-    <NodePicker value={companyId} placeholder="Pick a company" onChange={(cid) => go(cid, freq, key)}
-      filter={(n, picking) => (picking ? n.type === 'company' : true)} />
-  );
   const top = (
-    <div className="topbar">
-      {companyPicker}
-      <Seg value={freq} options={[['monthly', 'Monthly'], ['weekly', 'Weekly']]} onChange={(f) => go(companyId, f, null)} />
-      <PeriodSelect freq={freq} value={key} periods={periods} onChange={(k) => go(companyId, freq, k)} />
-      <div className="spacer" />
-      {data && <button onClick={showHistory}>History</button>}
-      {data && <Link to={`/company/${companyId}`}><button>View report</button></Link>}
+    <div className="bar">
+      <NodeSelect value={cid} companiesOnly onChange={(c) => go(c, week)} />
+      <WeekSelect value={week} onChange={(w) => go(cid, w)} from={d?.setup?.start_week} />
+      {segs.length > 1 && <Seg value={month} options={segs.map((x) => [x.month, `MTD ${x.label}`])} onChange={setMonth} />}
+      <span className="sp" />
+      {d?.revision > 0 && <button onClick={async () => setHist(await api.get(`${url}/history`))}>History</button>}
     </div>
   );
 
-  if (!companyId) return <>{top}<div className="content"><div className="empty">No company assigned. Ask an administrator to give you access.</div></div></>;
-  if (err) return <>{top}<div className="content"><div className="alert err">{err}</div></div></>;
-  if (!data) return <>{top}<Spinner /></>;
+  if (!cid) return <>{top}<div className="empty">No company assigned.</div></>;
+  if (err) return <>{top}<div className="note err">{err}</div></>;
+  if (!d || !s) return <>{top}<Loading /></>;
 
-  const c = data.comparatives;
-  const ed = data.editable;
-  const reopened = data.status === 'reopened';
-  const filledCount = inputLines.filter((l) => parseNum(values[l.id]) != null).length;
+  const ed = d.editable;
+  const fileBlock = d.not_ended ? 'Week not ended' : d.unfiled.length ? `File first: ${d.unfiled.join(', ')}` : '';
+  const cols = 1 + segs.length + 9 + 2;
 
   return (
     <>
       {top}
-      <div className="content">
-        <div className="grid" style={{ gridTemplateColumns: '220px minmax(0,1fr)', alignItems: 'start' }}>
-          <div className="card">
-            <div className="card-h"><h3>Recent {freq === 'weekly' ? 'weeks' : 'months'}</h3></div>
-            <div style={{ padding: 6 }}>
-              {data.recent.map((r) => (
-                <div key={r.key} className={`tree`}><div className={`tn ${r.key === key ? 'sel' : ''}`} onClick={() => go(companyId, freq, r.key)}>
-                  <span className="grow small">{freq === 'weekly' ? r.key : r.label}</span><Status status={r.status} />
-                </div></div>
-              ))}
-            </div>
-          </div>
-
-          <div className="stack">
-            <div className="page-head" style={{ marginBottom: 0 }}>
-              <div>
-                <div className="crumbs">{data.path.slice(0, -1).map((p) => p.name).join(' › ')}</div>
-                <h1 style={{ marginTop: 4 }}>{data.company.name}</h1>
-                <div className="sub">
-                  {freq === 'weekly' ? 'Weekly' : 'Monthly'} figures · {data.period.label} · {data.company.currency} · due {data.due}
-                </div>
-              </div>
-              <div className="spacer" />
-              <Status status={data.status} overdue={data.status !== 'filed' && new Date() > new Date(data.due)} />
-              {data.revision > 0 && <span className="badge">rev {data.revision}</span>}
-            </div>
-
-            {data.status === 'filed' && (
-              <div className="alert ok">
-                <span>🔒</span>
-                <span className="grow">These figures are <b>filed and locked</b> (revision {data.revision}). They feed the consolidated results and become
-                  the comparatives for later periods.{!isAdmin && ' Contact Group Finance if a correction is needed.'}</span>
-                {data.can_reopen && <button className="sm" onClick={() => setConfirm('reopen')}>Reopen for correction</button>}
-              </div>
-            )}
-            {reopened && (
-              <div className="alert info"><span>✎</span><span>Reopened for correction. Until you file again, the group view keeps using
-                revision {data.revision}. The column on the right shows those locked figures.</span></div>
-            )}
-            {data.not_started && <div className="alert warn">This period has not started yet.</div>}
-            {!ed && data.status !== 'filed' && !data.not_started && <div className="alert warn">You can view these figures but not edit them.</div>}
-            {lines.length === 0 && (
-              <div className="alert warn">No {freq} reporting format is set up for this company yet.{isAdmin && <> <Link to={`/setup/formats/${companyId}/${freq}`}>Set it up →</Link></>}</div>
-            )}
-
-            {lines.length > 0 && (
-              <div className="card entry">
-                <div className="card-b flush tablewrap" style={{ maxHeight: 'calc(100vh - 330px)' }}>
-                  <table className="t">
-                    <thead>
-                      <tr>
-                        <th style={{ minWidth: 240 }}>Line</th>
-                        <th className="num">{data.period.label.split(' (')[0]}</th>
-                        <th>Note</th>
-                        {reopened && <th className="num locked">Filed rev {c.last_filed?.revision}</th>}
-                        <th className="num locked" title="Last filed, locked">{c.prev.label.split(' (')[0]} 🔒</th>
-                        <th className="num">Δ</th>
-                        <th className="num locked" title="Last filed, locked">{c.ly.label.split(' (')[0]} 🔒</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {lines.map((l) => {
-                        if (l.line_type === 'header') return <tr key={l.id} className="hdr"><td colSpan={reopened ? 7 : 6} style={{ paddingLeft: 12 + l.indent * 16 }}>{l.label}</td></tr>;
-                        const idx = inputLines.indexOf(l);
-                        const cur = computed.get(l.id);
-                        const pv = c.prev.byId?.[l.id] ?? c.prev.byCode?.[l.code] ?? null;
-                        const lv = c.ly.byId?.[l.id] ?? c.ly.byCode?.[l.code] ?? null;
-                        const vp = variance(cur, pv);
-                        const bad = l.line_type === 'input' && Number.isNaN(parseNum(values[l.id]));
-                        return (
-                          <tr key={l.id} className={`${l.bold || l.line_type === 'formula' ? 'b' : ''} ${l.required ? 'req' : ''}`}>
-                            <td className="lbl" style={{ paddingLeft: 12 + l.indent * 16 }} title={l.formula ? `= ${l.formula}` : l.code}>
-                              <span className="lblt">{l.label}</span>
-                            </td>
-                            {l.line_type === 'input' ? (
-                              <td className="num">
-                                {ed ? (
-                                  <input className="val" value={values[l.id] ?? ''} ref={(el) => { inputs.current[l.id] = el; }}
-                                    style={bad ? { borderColor: 'var(--bad)' } : undefined}
-                                    onChange={(e) => setVal(l.id, e.target.value)} onPaste={(e) => onPaste(e, idx)} onKeyDown={(e) => onKey(e, idx)}
-                                    onBlur={() => { const n = parseNum(values[l.id]); if (n != null && !Number.isNaN(n)) setValues((x) => ({ ...x, [l.id]: fmtPlain(n, Math.abs(n % 1) > 0 ? 2 : 0) })); }}
-                                    placeholder="0" inputMode="decimal" />
-                                ) : fmtPlain(cur, 0) || '–'}
-                              </td>
-                            ) : <td className="num calc">{cur == null ? '–' : fmtPlain(cur, 0)}</td>}
-                            <td>
-                              {l.line_type === 'input' && (ed
-                                ? <input className="note" value={notes[l.id] || ''} placeholder="" onChange={(e) => { setNotes((x) => ({ ...x, [l.id]: e.target.value })); setDirty(true); }} />
-                                : <span className="small muted">{notes[l.id]}</span>)}
-                            </td>
-                            {reopened && <td className="num locked">{fmtPlain(c.last_filed?.byId?.[l.id] ?? c.last_filed?.byCode?.[l.code], 0) || '–'}</td>}
-                            <td className="num locked">{c.prev.missing ? <span className="faint">–</span> : fmtPlain(pv, 0) || '–'}</td>
-                            <td className="num"><span className="delta flat">{vp.text}</span></td>
-                            <td className="num locked">{c.ly.missing ? <span className="faint">–</span> : fmtPlain(lv, 0) || '–'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
-            {lines.length > 0 && (
-              <div className="card"><div className="card-b stack">
-                <label className="field">Remarks / commentary for management
-                  <textarea rows={2} value={remarks} disabled={!ed} onChange={(e) => { setRemarks(e.target.value); setDirty(true); }}
-                    placeholder="Key reasons for movements, one-offs, etc." />
-                </label>
-                {ed && (
-                  <div className="row">
-                    <span className="muted small">{filledCount}/{inputLines.length} lines filled · Tip: paste a column from Excel into the first box · Enter moves down</span>
-                    <div className="spacer" />
-                    {dirty && <span className="small" style={{ color: 'var(--warn)' }}>Unsaved changes</span>}
-                    <button onClick={save} disabled={busy}>Save draft</button>
-                    <button className="primary" disabled={busy || invalid.length > 0} onClick={() => setConfirm('file')}>
-                      {reopened ? 'Refile & lock' : 'File & lock'}
-                    </button>
-                  </div>
-                )}
-                {c.prev.missing && <div className="muted small">No locked filing for {c.prev.label}, so there is no previous-period comparative.</div>}
-              </div></div>
-            )}
-          </div>
-        </div>
+      <div className="title">
+        <h1>{d.company.name}</h1>
+        <span className="meta">{d.week.label} · due {d.due} · {STATUS[d.status]}{d.revision ? ` · rev ${d.revision}` : ''}</span>
+        <span className="sp" />
+        {d.can_reopen && <button onClick={() => setAsk('reopen')}>Reopen</button>}
       </div>
 
-      {confirm === 'file' && (
-        <Confirm title={reopened ? 'Refile figures' : 'File figures'} confirmText="File & lock" onClose={() => setConfirm(null)} onConfirm={file}
-          message={<>You're about to file <b>{data.company.name}</b> figures for <b>{data.period.label}</b>. Once filed they are locked and feed the group
-            consolidation. Only Group Finance can reopen them.</>} />
-      )}
-      {confirm === 'reopen' && (
-        <Confirm title="Reopen filed figures" confirmText="Reopen" danger onClose={() => setConfirm(null)} onConfirm={reopen} input="Reason (kept in the audit log)"
-          message={<>The consolidated view keeps using revision {data.revision} until the company files again.</>} />
-      )}
-      {history && (
-        <Modal title={`Filing history · ${data.period.label}`} onClose={() => setHistory(null)} wide>
-          {history.filings.length === 0 ? <div className="empty">Nothing filed yet.</div> : (
-            <table className="t">
-              <thead><tr><th>Line</th>{history.filings.map((f) => <th key={f.id} className="num">Rev {f.revision}<div className="faint" style={{ textTransform: 'none' }}>{f.filed_at.slice(0, 16)} · {f.filed_by || '—'}</div></th>)}</tr></thead>
-              <tbody>
-                {history.filings[0].lines.filter((l) => l.line_type !== 'header').map((l) => (
-                  <tr key={l.id}><td>{l.label}</td>{history.filings.map((f) => {
-                    const v = f.lines.find((x) => x.id === l.id || x.code === l.code)?.value;
-                    const changed = f !== history.filings[history.filings.length - 1] && history.filings.some((g) => (g.lines.find((x) => x.id === l.id)?.value) !== v);
-                    return <td key={f.id} className="num" style={changed ? { background: '#fff8e6' } : undefined}>{fmtPlain(v, 0) || '–'}</td>;
-                  })}</tr>
-                ))}
-              </tbody>
-            </table>
+      {d.needs_setup || d.before_start ? (
+        canEnter(cid) || isAdmin ? <Setup cid={cid} onDone={load} /> : <div className="empty">Reporting not started.</div>
+      ) : (
+        <>
+          {d.status === 'reopened' && <div className="note warn">Reopened · group figures still use rev {d.revision} until filed again</div>}
+          {d.status !== 'filed' && d.unfiled.length > 0 && <div className="note warn">Earlier weeks not filed: {d.unfiled.map((w) => <Link key={w} to={`/enter/${cid}/${w}`} style={{ marginRight: 8 }}>{w}</Link>)}</div>}
+          {!sections ? <Loading /> : (
+            <div className="wrap entry">
+              <table className="r">
+                <thead>
+                  <tr className="g">
+                    <th className="l" />
+                    <th colSpan={segs.length} className="gap">This week</th>
+                    <th colSpan={3} className="gap">Week</th>
+                    <th colSpan={3} className="gap">MTD · {monthName(month)}</th>
+                    <th colSpan={3} className="gap">YTD</th>
+                    <th className="gap">Last week</th>
+                    <th />
+                  </tr>
+                  <tr>
+                    <th className="l" style={{ minWidth: 230 }} />
+                    {segs.map((x, i) => <th key={x.month} className={i === 0 ? 'gap' : ''}>{x.label}</th>)}
+                    <th className="gap">Total</th><th>Target</th><th>%</th>
+                    <th className="gap">Actual</th><th>Target</th><th>%</th>
+                    <th className="gap">Actual</th><th>Target</th><th>%</th>
+                    <th className="gap" /><th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {sections.map((sec) => (
+                    <Fragment key={sec.code}>
+                      <tr className="sec"><td colSpan={cols}>{sec.name}</td></tr>
+                      {sec.rows.map((x, i) => {
+                        if (x.group) return <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l" style={{ paddingLeft: 8 }}>{x.name}</td></tr>;
+                        const inp = isInput(x.code) && !x.strong;
+                        const fmt = x.fmt;
+                        const op = x.nature === 'opening';
+                        const pc = (p) => vr(p.a, p.t, x.hib, fmt);
+                        const showAdj = openAdj.has(x.code) || (s.adj[x.code] && s.adj[x.code].value) || (noteCodes.has(x.code) && segs.some((g) => parseNum(s.values[x.code]?.[g.month])));
+                        const lw = d.last_week?.values?.[x.code];
+                        return (
+                          <Fragment key={x.code}>
+                            <tr className={x.strong ? 'tot' : ''}>
+                              <td className="l" style={{ paddingLeft: 8 + x.depth * 16 }}>{x.name}</td>
+                              {segs.map((g, j) => (
+                                <td key={g.month} className={`n ${j === 0 ? 'gap' : ''}`}>
+                                  {inp && ed ? (
+                                    <input className={`v ${Number.isNaN(parseNum(s.values[x.code]?.[g.month])) ? 'bad' : ''}`}
+                                      ref={(el) => { refs.current[`${x.code}|${g.month}`] = el; }}
+                                      value={s.values[x.code]?.[g.month] ?? ''}
+                                      onChange={(e) => change((st) => { (st.values[x.code] ||= {})[g.month] = e.target.value; return st; })}
+                                      onBlur={(e) => { const n = parseNum(e.target.value); if (n != null && !Number.isNaN(n)) change((st) => { st.values[x.code][g.month] = plainNum(n); return st; }); }}
+                                      onKeyDown={(e) => onKey(e, x.code, g.month)} onPaste={(e) => onPaste(e, x.code, g.month)} inputMode="decimal" />
+                                  ) : inp ? fv(parseNum(s.values[x.code]?.[g.month]), fmt, '1') : ''}
+                                </td>
+                              ))}
+                              <td className="n gap">{fv(x.wk.a, fmt, '1')}</td>
+                              <td className="n lock">{op ? '' : fv(x.wk.t, fmt, '1')}</td>
+                              <td className={`n ${pc(x.wk).cls}`}>{op ? '' : fpct(pc(x.wk).pct)}</td>
+                              <td className="n gap">{fv(x.mtd.a, fmt, '1')}</td>
+                              <td className="n lock">{op ? '' : fv(x.mtd.t, fmt, '1')}</td>
+                              <td className={`n ${pc(x.mtd).cls}`}>{op ? '' : fpct(pc(x.mtd).pct)}</td>
+                              <td className="n gap">{fv(x.ytd.a, fmt, '1')}</td>
+                              <td className="n lock">{op ? '' : fv(x.ytd.t, fmt, '1')}</td>
+                              <td className={`n ${pc(x.ytd).cls}`}>{op ? '' : fpct(pc(x.ytd).pct)}</td>
+                              <td className="n gap lock">{lw != null ? fv(lw, fmt, '1') : ''}</td>
+                              <td>{inp && ed && <button className="link small" onClick={() => setOpenAdj((o) => { const n = new Set(o); n.has(x.code) ? n.delete(x.code) : n.add(x.code); return n; })}>adj</button>}</td>
+                            </tr>
+                            {inp && showAdj && (
+                              <tr className="adj">
+                                <td className="l small" style={{ paddingLeft: 24 + x.depth * 16 }}>{noteCodes.has(x.code) ? 'Explanation' : 'Prior-week adjustment'}</td>
+                                {noteCodes.has(x.code) ? (
+                                  <td colSpan={segs.length + 10}>
+                                    <input className="t" disabled={!ed} value={s.notes[x.code] || ''} onChange={(e) => change((st) => { st.notes[x.code] = e.target.value; return st; })} />
+                                  </td>
+                                ) : (
+                                  <>
+                                    <td className="n gap">
+                                      <input className="v" disabled={!ed} value={s.adj[x.code]?.value ?? ''} placeholder="+ / −"
+                                        onChange={(e) => change((st) => { st.adj[x.code] = { ...(st.adj[x.code] || { reason: '' }), value: e.target.value }; return st; })} />
+                                    </td>
+                                    <td colSpan={segs.length - 1 + 10}>
+                                      <input className="t" disabled={!ed} value={s.adj[x.code]?.reason || ''} placeholder="Reason"
+                                        style={parseNum(s.adj[x.code]?.value) && !s.adj[x.code]?.reason ? { borderColor: 'var(--bad)' } : undefined}
+                                        onChange={(e) => change((st) => { st.adj[x.code] = { ...(st.adj[x.code] || { value: '' }), reason: e.target.value }; return st; })} />
+                                    </td>
+                                  </>
+                                )}
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-          {history.reopens.length > 0 && <div className="stack">
-            <h3>Reopen log</h3>
-            {history.reopens.map((r, i) => <div key={i} className="small"><b>{r.at}</b> · {r.name}: {r.detail.reason} (was rev {r.detail.revision})</div>)}
-          </div>}
+          <div className="row" style={{ marginTop: 16, alignItems: 'flex-end' }}>
+            <label className="f" style={{ flex: 1, minWidth: 300 }}>Remarks
+              <textarea rows={2} disabled={!ed} value={s.remarks} onChange={(e) => { setS({ ...s, remarks: e.target.value }); setDirty(true); }} />
+            </label>
+            {ed && <>
+              <button onClick={save} disabled={busy}>Save draft{dirty ? ' •' : ''}</button>
+              <button className="dark" onClick={() => setAsk('file')} disabled={busy || !!fileBlock} title={fileBlock}>{d.status === 'reopened' ? 'Refile' : 'File'}</button>
+            </>}
+          </div>
+          {ed && fileBlock && <div className="small mute" style={{ marginTop: 6, textAlign: 'right' }}>{fileBlock}</div>}
+        </>
+      )}
+
+      {ask === 'file' && <Ask title={`File ${d.company.name} · ${d.week.key}?`} okText="File" onClose={() => setAsk(null)} onOk={file} />}
+      {ask === 'reopen' && <Ask title="Reopen" label="Reason" okText="Reopen" onClose={() => setAsk(null)}
+        onOk={async (reason) => { try { await api.post(`${url}/reopen`, { reason }); await load(); } catch (e) { notify(e.message, 'err'); } }} />}
+      {hist && (
+        <Modal title={`${d.company.name} · ${d.week.key}`} wide onClose={() => setHist(null)}>
+          <table className="r">
+            <thead><tr><th className="l" />{hist.filings.map((f) => <th key={f.revision}>rev {f.revision}<br /><span className="mute">{f.filed_at.slice(0, 16)}{f.filed_by ? ` · ${f.filed_by}` : ''}</span></th>)}</tr></thead>
+            <tbody>{hist.items.filter((it) => hist.filings.some((f) => f.totals[it.key] != null)).map((it) => (
+              <tr key={it.key}><td className="l">{it.label}</td>{hist.filings.map((f) => <td key={f.revision} className="n">{fv(f.totals[it.key], /:(PQ|SQ)$/.test(it.key) ? 'qty' : 'amount', '1')}</td>)}</tr>
+            ))}</tbody>
+          </table>
+          {hist.reopens.map((r, i) => <div key={i} className="small">{r.at} · {r.name}: {r.detail.reason}</div>)}
         </Modal>
       )}
     </>

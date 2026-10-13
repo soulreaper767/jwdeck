@@ -11,12 +11,8 @@ export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
 
 db.exec(`
-CREATE TABLE IF NOT EXISTS settings (
-  key   TEXT PRIMARY KEY,
-  value TEXT
-);
+CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 
--- Company tree: group -> clusters (nestable) -> companies (leaves that report)
 CREATE TABLE IF NOT EXISTS nodes (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   parent_id  INTEGER REFERENCES nodes(id),
@@ -30,87 +26,118 @@ CREATE TABLE IF NOT EXISTS nodes (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Group-wide standard heads used for consolidation
-CREATE TABLE IF NOT EXISTS heads (
-  id               INTEGER PRIMARY KEY AUTOINCREMENT,
-  parent_id        INTEGER REFERENCES heads(id),
-  code             TEXT NOT NULL UNIQUE,
-  name             TEXT NOT NULL,
-  statement        TEXT NOT NULL DEFAULT 'PL' CHECK (statement IN ('PL','BS','CF','KPI')),
-  head_type        TEXT NOT NULL DEFAULT 'input' CHECK (head_type IN ('section','input','group','formula')),
-  nature           TEXT NOT NULL DEFAULT 'flow' CHECK (nature IN ('flow','balance','average')),
-  formula          TEXT,
-  fmt              TEXT NOT NULL DEFAULT 'amount' CHECK (fmt IN ('amount','percent','number')),
-  higher_is_better INTEGER NOT NULL DEFAULT 1,
-  frequency        TEXT NOT NULL DEFAULT 'both' CHECK (frequency IN ('both','weekly','monthly')),
-  is_kpi           INTEGER NOT NULL DEFAULT 0,
-  sort             INTEGER NOT NULL DEFAULT 0,
-  active           INTEGER NOT NULL DEFAULT 1
+-- Reporting packs and their standard lines (same for every company)
+CREATE TABLE IF NOT EXISTS sections (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  sort INTEGER NOT NULL DEFAULT 0
 );
 
--- Each company's own reporting format (per frequency), mapped to standard heads
-CREATE TABLE IF NOT EXISTS company_lines (
+CREATE TABLE IF NOT EXISTS lines (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  code          TEXT NOT NULL UNIQUE,
+  name          TEXT NOT NULL,
+  section       TEXT NOT NULL REFERENCES sections(code),
+  parent_id     INTEGER REFERENCES lines(id),
+  kind          TEXT NOT NULL CHECK (kind IN ('input','sku_total','opening','sum','formula')),
+  formula       TEXT,
+  nature        TEXT NOT NULL DEFAULT 'flow' CHECK (nature IN ('flow','opening','closing')),
+  fmt           TEXT NOT NULL DEFAULT 'amount' CHECK (fmt IN ('amount','percent')),
+  hib           INTEGER NOT NULL DEFAULT 1,
+  budget        INTEGER NOT NULL DEFAULT 0,
+  note_required INTEGER NOT NULL DEFAULT 0,
+  is_kpi        INTEGER NOT NULL DEFAULT 0,
+  system        INTEGER NOT NULL DEFAULT 0,
+  sort          INTEGER NOT NULL DEFAULT 0,
+  active        INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS skus (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   company_id INTEGER NOT NULL REFERENCES nodes(id),
-  frequency  TEXT NOT NULL CHECK (frequency IN ('weekly','monthly')),
   code       TEXT NOT NULL,
-  label      TEXT NOT NULL,
-  line_type  TEXT NOT NULL DEFAULT 'input' CHECK (line_type IN ('header','input','formula')),
-  formula    TEXT,
-  head_id    INTEGER REFERENCES heads(id),
-  sign       INTEGER NOT NULL DEFAULT 1,
-  indent     INTEGER NOT NULL DEFAULT 0,
-  bold       INTEGER NOT NULL DEFAULT 0,
-  required   INTEGER NOT NULL DEFAULT 0,
+  name       TEXT NOT NULL,
+  unit       TEXT NOT NULL DEFAULT 'units',
   sort       INTEGER NOT NULL DEFAULT 0,
   active     INTEGER NOT NULL DEFAULT 1,
-  UNIQUE (company_id, frequency, code)
+  UNIQUE (company_id, code)
 );
 
--- Working copy of a company's figures for a period
-CREATE TABLE IF NOT EXISTS submissions (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  company_id   INTEGER NOT NULL REFERENCES nodes(id),
-  frequency    TEXT NOT NULL CHECK (frequency IN ('weekly','monthly')),
-  period_key   TEXT NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','filed','reopened')),
-  revision     INTEGER NOT NULL DEFAULT 0,
-  remarks      TEXT,
+CREATE TABLE IF NOT EXISTS company_setup (
+  company_id   INTEGER PRIMARY KEY REFERENCES nodes(id),
+  start_week   TEXT NOT NULL,
+  opening_cash REAL NOT NULL DEFAULT 0,
   updated_by   INTEGER,
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (company_id, frequency, period_key)
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS submission_values (
-  submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
-  line_id       INTEGER NOT NULL REFERENCES company_lines(id),
-  value         REAL,
-  note          TEXT,
-  PRIMARY KEY (submission_id, line_id)
+-- Budgets. item = line code, or SKU:<id>:PQ|SQ|SV
+-- Annual figure per fiscal year, spread over months by days; a monthly row overrides the spread.
+CREATE TABLE IF NOT EXISTS budget_annual (
+  company_id INTEGER NOT NULL REFERENCES nodes(id),
+  fy         INTEGER NOT NULL,
+  item       TEXT NOT NULL,
+  value      REAL NOT NULL,
+  PRIMARY KEY (company_id, fy, item)
+);
+CREATE TABLE IF NOT EXISTS budget_month (
+  company_id INTEGER NOT NULL REFERENCES nodes(id),
+  month_key  TEXT NOT NULL,
+  item       TEXT NOT NULL,
+  value      REAL NOT NULL,
+  PRIMARY KEY (company_id, month_key, item)
 );
 
--- Immutable locked snapshots. Consolidation + comparatives read only from here.
+CREATE TABLE IF NOT EXISTS reports (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER NOT NULL REFERENCES nodes(id),
+  week_key   TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','filed','reopened')),
+  revision   INTEGER NOT NULL DEFAULT 0,
+  remarks    TEXT,
+  updated_by INTEGER,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (company_id, week_key)
+);
+CREATE TABLE IF NOT EXISTS report_values (
+  report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  item      TEXT NOT NULL,
+  month_key TEXT NOT NULL,
+  value     REAL,
+  PRIMARY KEY (report_id, item, month_key)
+);
+CREATE TABLE IF NOT EXISTS report_adj (
+  report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  item      TEXT NOT NULL,
+  value     REAL NOT NULL,
+  reason    TEXT NOT NULL,
+  PRIMARY KEY (report_id, item)
+);
+CREATE TABLE IF NOT EXISTS report_notes (
+  report_id INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+  item      TEXT NOT NULL,
+  note      TEXT NOT NULL,
+  PRIMARY KEY (report_id, item)
+);
+
+-- Locked snapshots; all reporting reads from here
 CREATE TABLE IF NOT EXISTS filings (
-  id            INTEGER PRIMARY KEY AUTOINCREMENT,
-  submission_id INTEGER NOT NULL REFERENCES submissions(id),
-  company_id    INTEGER NOT NULL REFERENCES nodes(id),
-  frequency     TEXT NOT NULL,
-  period_key    TEXT NOT NULL,
-  revision      INTEGER NOT NULL,
-  currency      TEXT NOT NULL,
-  lines_json    TEXT NOT NULL,
-  heads_json    TEXT NOT NULL,
-  remarks       TEXT,
-  filed_by      INTEGER,
-  filed_at      TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (company_id, frequency, period_key, revision)
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_id  INTEGER NOT NULL REFERENCES reports(id),
+  company_id INTEGER NOT NULL REFERENCES nodes(id),
+  week_key   TEXT NOT NULL,
+  revision   INTEGER NOT NULL,
+  currency   TEXT NOT NULL,
+  data_json  TEXT NOT NULL,
+  filed_by   INTEGER,
+  filed_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (company_id, week_key, revision)
 );
-CREATE INDEX IF NOT EXISTS ix_filings_lookup ON filings(company_id, frequency, period_key, revision DESC);
 
 CREATE TABLE IF NOT EXISTS fx_rates (
-  currency   TEXT NOT NULL,
-  month_key  TEXT NOT NULL,
-  rate       REAL NOT NULL,
+  currency  TEXT NOT NULL,
+  month_key TEXT NOT NULL,
+  rate      REAL NOT NULL,
   PRIMARY KEY (currency, month_key)
 );
 
@@ -140,8 +167,7 @@ const DEFAULT_SETTINGS = {
   group_name: 'JW Group',
   group_currency: 'PKR',
   fiscal_year_start_month: '7',
-  weekly_due_days: '3',
-  monthly_due_days: '10',
+  week_due_days: '1',
 };
 const insSetting = db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)');
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insSetting.run(k, v);
@@ -170,6 +196,5 @@ export function audit(userId, action, entity, entityId, detail) {
       detail == null ? null : typeof detail === 'string' ? detail : JSON.stringify(detail));
 }
 
-// node:sqlite returns null-prototype rows; normalise to plain objects for JSON.
 export const plain = (r) => (r ? { ...r } : r);
 export const plainAll = (rows) => rows.map((r) => ({ ...r }));

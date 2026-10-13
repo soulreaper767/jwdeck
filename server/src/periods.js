@@ -1,152 +1,120 @@
-// Period keys: monthly = 'YYYY-MM', weekly = ISO week 'YYYY-Www' (Mon..Sun). All maths in UTC.
+// Weeks are ISO weeks (Mon..Sun) keyed 'YYYY-Www'. Months are 'YYYY-MM'.
+// A week that crosses a month end is split into two portions (segments), one per month.
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DAY = 86400000;
+const pad = (n) => String(n).padStart(2, '0');
 
-const pad = (n, w = 2) => String(n).padStart(w, '0');
-const ymd = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+export const ymd = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+export const monthOfDate = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
 
-function isoWeekInfo(date) {
+function isoWeek(date) {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const dow = d.getUTCDay() || 7;
-  d.setUTCDate(d.getUTCDate() + 4 - dow); // Thursday of this week decides the ISO year
+  d.setUTCDate(d.getUTCDate() + 4 - dow);
   const year = d.getUTCFullYear();
-  const week = Math.ceil(((d - Date.UTC(year, 0, 1)) / DAY + 1) / 7);
-  return { year, week };
+  return { year, week: Math.ceil(((d - Date.UTC(year, 0, 1)) / DAY + 1) / 7) };
 }
 
-function isoWeekMonday(year, week) {
-  const jan4 = new Date(Date.UTC(year, 0, 4));
-  const dow = jan4.getUTCDay() || 7;
-  return new Date(jan4.getTime() + ((1 - dow) + (week - 1) * 7) * DAY);
-}
+const weeksInYear = (y) => isoWeek(new Date(Date.UTC(y, 11, 28))).week;
 
-const weeksInYear = (year) => isoWeekInfo(new Date(Date.UTC(year, 11, 28))).week;
-
-export function isValidKey(freq, key) {
-  if (freq === 'monthly') {
-    const m = /^(\d{4})-(\d{2})$/.exec(key || '');
-    return !!m && +m[2] >= 1 && +m[2] <= 12;
-  }
-  if (freq === 'weekly') {
-    const m = /^(\d{4})-W(\d{2})$/.exec(key || '');
-    return !!m && +m[2] >= 1 && +m[2] <= weeksInYear(+m[1]);
-  }
-  return false;
-}
-
-export function keyForDate(freq, date = new Date()) {
-  if (freq === 'monthly') return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}`;
-  const { year, week } = isoWeekInfo(date);
+export function weekKey(date = new Date()) {
+  const { year, week } = isoWeek(date);
   return `${year}-W${pad(week)}`;
 }
 
-export function bounds(freq, key) {
-  if (freq === 'monthly') {
-    const [y, m] = key.split('-').map(Number);
-    return { start: new Date(Date.UTC(y, m - 1, 1)), end: new Date(Date.UTC(y, m, 0)) };
-  }
-  const [y, w] = key.split('-W').map(Number);
-  const start = isoWeekMonday(y, w);
-  return { start, end: new Date(start.getTime() + 6 * DAY) };
+export function isWeek(k) {
+  const m = /^(\d{4})-W(\d{2})$/.exec(k || '');
+  return !!m && +m[2] >= 1 && +m[2] <= weeksInYear(+m[1]);
 }
+export const isMonth = (k) => /^\d{4}-(0[1-9]|1[0-2])$/.test(k || '');
 
-export function label(freq, key) {
-  if (freq === 'monthly') {
-    const [y, m] = key.split('-').map(Number);
-    return `${MONTHS[m - 1]} ${y}`;
-  }
-  const { start, end } = bounds(freq, key);
-  const s = `${start.getUTCDate()} ${MONTHS[start.getUTCMonth()]}`;
-  const e = `${end.getUTCDate()} ${MONTHS[end.getUTCMonth()]}`;
-  return `${key.replace('-', ' ')} (${s}–${e})`;
+export function weekStart(k) {
+  const [y, w] = k.split('-W').map(Number);
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const dow = jan4.getUTCDay() || 7;
+  return new Date(jan4.getTime() + ((1 - dow) + (w - 1) * 7) * DAY);
 }
+export const weekEnd = (k) => new Date(weekStart(k).getTime() + 6 * DAY);
+export const shiftWeek = (k, n) => weekKey(new Date(weekStart(k).getTime() + n * 7 * DAY));
+export const lastClosedWeek = (now = new Date()) => shiftWeek(weekKey(now), -1);
 
-export function shift(freq, key, n) {
-  if (freq === 'monthly') {
-    const [y, m] = key.split('-').map(Number);
-    const idx = y * 12 + (m - 1) + n;
-    return `${Math.floor(idx / 12)}-${pad((idx % 12) + 1)}`;
-  }
-  const { start } = bounds(freq, key);
-  return keyForDate('weekly', new Date(start.getTime() + n * 7 * DAY));
-}
+export const daysInMonth = (m) => { const [y, mo] = m.split('-').map(Number); return new Date(Date.UTC(y, mo, 0)).getUTCDate(); };
+export const monthStart = (m) => { const [y, mo] = m.split('-').map(Number); return new Date(Date.UTC(y, mo - 1, 1)); };
+export const monthEnd = (m) => { const [y, mo] = m.split('-').map(Number); return new Date(Date.UTC(y, mo, 0)); };
+export const shiftMonth = (m, n) => { const [y, mo] = m.split('-').map(Number); const i = y * 12 + mo - 1 + n; return `${Math.floor(i / 12)}-${pad((i % 12) + 1)}`; };
+export const monthLabel = (m) => { const [y, mo] = m.split('-').map(Number); return `${MON[mo - 1]} ${y}`; };
 
-export const prev = (freq, key) => shift(freq, key, -1);
+const dm = (d) => `${d.getUTCDate()} ${MON[d.getUTCMonth()]}`;
 
-export function lastYear(freq, key) {
-  if (freq === 'monthly') return shift(freq, key, -12);
-  const [y, w] = key.split('-W').map(Number);
-  return `${y - 1}-W${pad(Math.min(w, weeksInYear(y - 1)))}`;
-}
-
-// Last n keys ending at (and including) endKey, oldest first.
-export function series(freq, endKey, n) {
+// Portions of a week, one per calendar month it touches.
+export function segments(k) {
+  const s = weekStart(k);
+  const e = weekEnd(k);
   const out = [];
-  for (let i = n - 1; i >= 0; i--) out.push(shift(freq, endKey, -i));
+  let cur = s;
+  while (cur <= e) {
+    const m = monthOfDate(cur);
+    const end = new Date(Math.min(e.getTime(), monthEnd(m).getTime()));
+    out.push({
+      month: m, start: ymd(cur), end: ymd(end), days: Math.round((end - cur) / DAY) + 1,
+      label: cur.getUTCMonth() === end.getUTCMonth() ? `${cur.getUTCDate()}–${dm(end)}` : `${dm(cur)}–${dm(end)}`,
+      closes_month: ymd(end) === ymd(monthEnd(m)),
+    });
+    cur = new Date(end.getTime() + DAY);
+  }
   return out;
 }
 
-// Month a period belongs to (for FX): weekly uses the ISO Thursday's month.
-export function monthOf(freq, key) {
-  if (freq === 'monthly') return key;
-  const { start } = bounds(freq, key);
-  return keyForDate('monthly', new Date(start.getTime() + 3 * DAY));
+export function weekLabel(k) {
+  const s = weekStart(k);
+  const e = weekEnd(k);
+  const range = s.getUTCMonth() === e.getUTCMonth() ? `${s.getUTCDate()}–${dm(e)}` : `${dm(s)} – ${dm(e)}`;
+  return `${k.slice(5)} · ${range} ${e.getUTCFullYear()}`;
 }
 
-export function fiscalYearStart(monthKey, fyStartMonth) {
-  const [y, m] = monthKey.split('-').map(Number);
-  const fyYear = m >= fyStartMonth ? y : y - 1;
-  return `${fyYear}-${pad(fyStartMonth)}`;
+export function describeWeek(k) {
+  return { key: k, label: weekLabel(k), start: ymd(weekStart(k)), end: ymd(weekEnd(k)), segments: segments(k) };
 }
 
-export function fiscalYearLabel(monthKey, fyStartMonth) {
-  const start = fiscalYearStart(monthKey, fyStartMonth);
-  const y = +start.slice(0, 4);
-  return fyStartMonth === 1 ? `FY${y}` : `FY${String(y).slice(2)}-${String(y + 1).slice(2)}`;
+// Weeks (in order) that have a portion inside month m
+export function monthWeeks(m) {
+  const out = [];
+  for (let k = weekKey(monthStart(m)); weekStart(k) <= monthEnd(m); k = shiftWeek(k, 1)) out.push(k);
+  return out;
 }
 
-// Keys covered by a view mode, ending at key. Weekly supports 'period' and 'mtd' (weeks whose month == key's month).
-export function rangeKeys(freq, key, mode, fyStartMonth) {
-  if (mode === 'period' || !mode) return [key];
-  if (freq === 'monthly') {
-    if (mode === 'ytd') {
-      const start = fiscalYearStart(key, fyStartMonth);
-      const out = [];
-      for (let k = start; k <= key; k = shift('monthly', k, 1)) out.push(k);
-      return out;
-    }
-    if (mode === 'qtd') {
-      const start = fiscalYearStart(key, fyStartMonth);
-      const [sy, sm] = start.split('-').map(Number);
-      const [y, m] = key.split('-').map(Number);
-      const offset = (y * 12 + m) - (sy * 12 + sm);
-      const qStart = shift('monthly', start, Math.floor(offset / 3) * 3);
-      const out = [];
-      for (let k = qStart; k <= key; k = shift('monthly', k, 1)) out.push(k);
-      return out;
-    }
-  }
-  if (freq === 'weekly' && mode === 'mtd') {
-    const month = monthOf('weekly', key);
-    const out = [];
-    for (let k = key; monthOf('weekly', k) === month; k = prev('weekly', k)) out.unshift(k);
-    return out;
-  }
-  return [key];
+export function weekRange(from, to) {
+  const out = [];
+  for (let k = from; k <= to; k = shiftWeek(k, 1)) out.push(k);
+  return out;
 }
 
-export function dueDate(freq, key, dueDays) {
-  const { end } = bounds(freq, key);
-  return new Date(end.getTime() + Number(dueDays || 0) * DAY);
+// Days of month m elapsed up to and including date string ymdEnd
+export function elapsed(m, ymdEnd) {
+  const e = new Date(`${ymdEnd}T00:00:00Z`);
+  const s = monthStart(m);
+  return Math.max(0, Math.min(daysInMonth(m), Math.round((e - s) / DAY) + 1));
 }
 
-export function describe(freq, key) {
-  const { start, end } = bounds(freq, key);
-  return { key, label: label(freq, key), start: ymd(start), end: ymd(end) };
+export function fyStart(m, startMonth) {
+  const [y, mo] = m.split('-').map(Number);
+  return `${mo >= startMonth ? y : y - 1}-${pad(startMonth)}`;
+}
+export function fyMonths(m, startMonth) {
+  const out = [];
+  for (let k = fyStart(m, startMonth); k <= m; k = shiftMonth(k, 1)) out.push(k);
+  return out;
+}
+export function fyLabel(m, startMonth) {
+  const y = +fyStart(m, startMonth).slice(0, 4);
+  return startMonth === 1 ? `FY${y}` : `FY${String(y).slice(2)}-${String(y + 1).slice(2)}`;
+}
+export function fyAllMonths(fy, startMonth) {
+  const out = [];
+  let k = `${fy}-${pad(startMonth)}`;
+  for (let i = 0; i < 12; i++, k = shiftMonth(k, 1)) out.push(k);
+  return out;
 }
 
-// Most recent closed period (the one users are normally expected to file).
-export function lastClosed(freq, now = new Date()) {
-  return prev(freq, keyForDate(freq, now));
-}
+export const dueDate = (k, days) => new Date(weekEnd(k).getTime() + Number(days || 1) * DAY);

@@ -1,62 +1,49 @@
-export const SCALES = {
-  auto: { label: 'Auto', div: null },
-  '1': { label: 'Units', div: 1, suffix: '' },
-  K: { label: "'000", div: 1e3, suffix: 'K' },
-  M: { label: 'Millions', div: 1e6, suffix: 'M' },
-  B: { label: 'Billions', div: 1e9, suffix: 'B' },
-};
+export const UNITS = { m: { label: 'PKR millions', div: 1e6, dp: 2 }, '1': { label: 'PKR', div: 1, dp: 0 } };
 
 const nf = (d) => new Intl.NumberFormat('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
 
-// Format a head/line value. fmt: amount | percent | number
-export function fmtVal(v, fmt = 'amount', scale = 'M', { compact = false } = {}) {
-  if (v == null || Number.isNaN(v)) return '–';
+// fmt: amount | percent | qty
+export function fv(v, fmt = 'amount', unit = 'm') {
+  if (v == null || Number.isNaN(v)) return '';
   if (fmt === 'percent') return `${nf(1).format(v)}%`;
-  if (fmt === 'number') return nf(0).format(v);
-  let s = scale;
-  if (s === 'auto') {
-    const a = Math.abs(v);
-    s = a >= 1e9 ? 'B' : a >= 1e6 ? 'M' : a >= 1e3 ? 'K' : '1';
-  }
-  const { div, suffix } = SCALES[s];
-  const x = v / div;
-  const digits = s === '1' ? 0 : Math.abs(x) >= 100 ? 1 : 2;
-  const str = nf(compact ? (Math.abs(x) >= 100 ? 0 : 1) : digits).format(Math.abs(x));
-  const out = `${str}${compact || scale === 'auto' ? suffix : ''}`;
-  return v < 0 ? `(${out})` : out;
+  if (fmt === 'qty') { const s = nf(Math.abs(v) < 100 && v % 1 ? 1 : 0).format(Math.abs(v)); return v < 0 ? `(${s})` : s; }
+  const u = UNITS[unit] || UNITS.m;
+  const s = nf(u.dp).format(Math.abs(v / u.div));
+  if (s === nf(u.dp).format(0)) return '–';
+  return v < 0 ? `(${s})` : s;
 }
 
-export const fmtPlain = (v, d = 0) => (v == null || v === '' ? '' : nf(d).format(v));
-
-// Variance between cur and base. Returns { pct, cls, text }
-export function variance(cur, base, higherIsBetter = 1, fmt = 'amount') {
-  if (cur == null || base == null) return { text: '', cls: 'flat', pct: null };
-  if (fmt === 'percent') {
-    const d = cur - base;
-    const cls = Math.abs(d) < 0.05 ? 'flat' : (d > 0) === !!higherIsBetter ? 'good' : 'bad';
-    return { text: `${d > 0 ? '+' : ''}${nf(1).format(d)}pp`, cls, pct: d };
-  }
-  if (base === 0) return { text: cur === 0 ? '0%' : 'n/m', cls: 'flat', pct: null };
-  const pct = ((cur - base) / Math.abs(base)) * 100;
-  const cls = Math.abs(pct) < 0.5 ? 'flat' : (pct > 0) === !!higherIsBetter ? 'good' : 'bad';
-  const arrow = pct > 0 ? '▲' : pct < 0 ? '▼' : '';
-  return { text: `${arrow} ${nf(1).format(Math.abs(pct))}%`, cls, pct };
+// variance of actual vs target → { d, pct, cls }
+export function vr(a, t, hib = 1, fmt = 'amount') {
+  if (a == null || t == null) return { d: null, pct: null, cls: '' };
+  const d = a - t;
+  const pct = fmt === 'percent' || t === 0 ? null : (d / Math.abs(t)) * 100;
+  const good = hib ? d >= 0 : d <= 0;
+  const tiny = fmt === 'percent' ? Math.abs(d) < 0.05 : Math.abs(pct ?? 0) < 0.5 && Math.abs(d) < 1;
+  return { d, pct, cls: tiny ? '' : good ? 'good' : 'bad' };
 }
+export const fpct = (p) => (p == null ? '' : `${p > 0 ? '+' : ''}${nf(1).format(p)}%`);
 
-export const STATUS_LABEL = { filed: 'Filed', draft: 'Draft', reopened: 'Reopened', missing: 'Not filed', new: 'Not started' };
+export const parseNum = (s) => {
+  if (s == null) return null;
+  let t = String(s).trim().replace(/,/g, '');
+  if (!t) return null;
+  let neg = false;
+  if (/^\(.*\)$/.test(t)) { neg = true; t = t.slice(1, -1); }
+  const n = Number(t);
+  if (Number.isNaN(n)) return NaN;
+  return neg ? -n : n;
+};
+export const plainNum = (v) => (v == null ? '' : nf(Math.abs(v % 1) > 0 ? 2 : 0).format(v));
 
 export function toCSV(rows) {
-  return rows.map((r) => r.map((c) => {
-    const s = c == null ? '' : String(c);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  }).join(',')).join('\n');
+  return rows.map((r) => r.map((c) => { const s = c == null ? '' : String(c); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(',')).join('\n');
 }
-
-export function download(name, text, type = 'text/csv') {
-  const blob = new Blob([text], { type });
+export function download(name, text) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
   a.download = name;
   a.click();
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+
+export const STATUS = { filed: 'Filed', draft: 'Draft', reopened: 'Reopened', missing: 'Not filed', new: 'Not started', na: '' };
