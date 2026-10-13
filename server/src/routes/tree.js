@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, audit, plain } from '../db.js';
-import { requireRole, scopeRoot } from '../auth.js';
+import { requireRole, scopeRoots } from '../auth.js';
 import { loadTree, isWithin } from '../engine.js';
 import { h, bad, notFound } from './util.js';
 
@@ -10,19 +10,22 @@ const ALLOWED_PARENT = { group: [null], cluster: ['group', 'cluster'], company: 
 
 function strip(n) {
   const { children, ...rest } = n;
-  return { ...rest, meta: JSON.parse(rest.meta || '{}'), children: children.map(strip) };
+  return { ...rest, children: children.map(strip) };
 }
 
+// The parts of the tree this user may open (one root for group users; their clusters/companies otherwise)
 r.get('/tree', h((req) => {
   const tree = loadTree();
-  const root = scopeRoot(req.user);
-  if (root == null) {
-    if (req.user.role !== 'admin' && req.user.role !== 'executive') return [];
-    return tree.roots.map(strip);
-  }
-  const n = tree.byId.get(root);
-  return n ? [strip(n)] : [];
+  return scopeRoots(req.user, tree).map((id) => strip(tree.byId.get(id)));
 }));
+
+const META_KEYS = ['short_name', 'legal_name', 'logo', 'description', 'business_nature', 'entity_type', 'start_date', 'registration_no',
+  'ntn', 'strn', 'address', 'city', 'country', 'website', 'head_name', 'head_title', 'finance_contact', 'email', 'phone', 'employees'];
+const cleanMeta = (m = {}) => {
+  const out = {};
+  for (const k of META_KEYS) if (m[k] != null && m[k] !== '') out[k] = k === 'logo' ? String(m[k]).slice(0, 400000) : String(m[k]).slice(0, 2000);
+  return out;
+};
 
 function checkPlacement(tree, type, parentId, selfId) {
   const parent = parentId ? tree.byId.get(Number(parentId)) : null;
@@ -42,7 +45,7 @@ r.post('/nodes', requireRole('admin'), h((req) => {
   checkPlacement(loadTree(), type, parent_id, null);
   const info = db.prepare('INSERT INTO nodes(parent_id, type, code, name, currency, sort, meta) VALUES (?,?,?,?,?,?,?)')
     .run(parent_id || null, type, String(code).trim().toUpperCase(), String(name).trim(),
-      String(currency).trim().toUpperCase(), Number(sort) || 0, JSON.stringify(meta || {}));
+      String(currency).trim().toUpperCase(), Number(sort) || 0, JSON.stringify(cleanMeta(meta)));
   audit(req.user.id, 'node.create', 'node', Number(info.lastInsertRowid), { code, name, type });
   return plain(db.prepare('SELECT * FROM nodes WHERE id = ?').get(info.lastInsertRowid));
 }));
@@ -59,7 +62,7 @@ r.put('/nodes/:id', requireRole('admin'), h((req) => {
     currency: b.currency != null ? String(b.currency).trim().toUpperCase() : cur.currency,
     sort: b.sort != null ? Number(b.sort) || 0 : cur.sort,
     active: b.active != null ? (b.active ? 1 : 0) : cur.active,
-    meta: b.meta != null ? JSON.stringify(b.meta) : cur.meta,
+    meta: b.meta != null ? JSON.stringify(cleanMeta(b.meta)) : cur.meta,
   };
   if (next.parent_id !== cur.parent_id) checkPlacement(loadTree(), cur.type, next.parent_id, id);
   if (next.currency !== cur.currency && cur.type === 'company') {
@@ -68,7 +71,7 @@ r.put('/nodes/:id', requireRole('admin'), h((req) => {
   }
   db.prepare('UPDATE nodes SET parent_id=?, code=?, name=?, currency=?, sort=?, active=?, meta=? WHERE id=?')
     .run(next.parent_id, next.code, next.name, next.currency, next.sort, next.active, next.meta, id);
-  audit(req.user.id, 'node.update', 'node', id, b);
+  audit(req.user.id, 'node.update', 'node', id, { ...b, meta: b.meta ? '(profile)' : undefined });
   return plain(db.prepare('SELECT * FROM nodes WHERE id = ?').get(id));
 }));
 
@@ -78,7 +81,7 @@ r.delete('/nodes/:id', requireRole('admin'), h((req) => {
   if (db.prepare('SELECT COUNT(*) c FROM reports WHERE company_id = ?').get(id).c) {
     throw bad('This company has figures on record. Deactivate it instead.');
   }
-  if (db.prepare('SELECT COUNT(*) c FROM users WHERE node_id = ?').get(id).c) throw bad('Users are assigned to this node');
+  if (db.prepare('SELECT COUNT(*) c FROM user_scopes WHERE node_id = ?').get(id).c) throw bad('Users are assigned to this node');
   for (const t of ['skus', 'company_setup', 'budget_annual', 'budget_month']) db.prepare(`DELETE FROM ${t} WHERE company_id = ?`).run(id);
   db.prepare('DELETE FROM nodes WHERE id = ?').run(id);
   audit(req.user.id, 'node.delete', 'node', id);

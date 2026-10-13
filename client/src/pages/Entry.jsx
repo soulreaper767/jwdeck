@@ -2,11 +2,12 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'rea
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useApp } from '../store.jsx';
 import { api } from '../lib/api.js';
-import { fv, vr, fpct, parseNum, plainNum, STATUS } from '../lib/format.js';
-import { NodeSelect, WeekSelect, Seg, Loading, Ask, Modal } from '../ui.jsx';
+import { fv, vr, fpct, parseNum, plainNum } from '../lib/format.js';
+import { NodeSelect, WeekSelect, Seg, Loading, Ask, Logo, Workflow } from '../ui.jsx';
 
 const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const monthName = (m) => (m ? `${MN[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}` : '');
+const when = (iso) => { const d = new Date(iso); return `${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`; };
 
 const toStr = (d) => {
   const v = {};
@@ -23,7 +24,7 @@ const toNum = (s) => {
   return { values, adj, notes: s.notes, remarks: s.remarks };
 };
 
-function Setup({ cid, onDone }) {
+export function OpeningSetup({ cid, onDone }) {
   const { notify } = useApp();
   const [info, setInfo] = useState(null);
   const [week, setWeek] = useState('');
@@ -34,11 +35,11 @@ function Setup({ cid, onDone }) {
     try { await api.put(`/companies/${cid}/setup`, { start_week: week, opening_cash: parseNum(cash) }); notify('Saved'); onDone(); } catch (e) { notify(e.message, 'err'); }
   };
   return (
-    <div className="box" style={{ maxWidth: 560 }}>
+    <div className="box" style={{ maxWidth: 620 }}>
       <h2 style={{ marginBottom: 10 }}>Opening position</h2>
       <div className="row" style={{ alignItems: 'flex-end' }}>
         <label className="f">First reporting week<WeekSelect value={week} onChange={setWeek} /></label>
-        <label className="f">Cash & bank at start of that week (PKR)<input className="n" value={cash} onChange={(e) => setCash(e.target.value)} onBlur={() => setCash(plainNum(parseNum(cash)))} style={{ width: 190 }} /></label>
+        <label className="f">Cash & bank at start (PKR)<input className="n" value={cash} onChange={(e) => setCash(e.target.value)} onBlur={() => setCash(plainNum(parseNum(cash)))} style={{ width: 190 }} /></label>
         <button className="dark" disabled={!info.can_edit_opening} onClick={save}>Save</button>
       </div>
       <div style={{ marginTop: 12 }} className="small">SKUs: {info.skus.filter((s) => s.active).map((s) => s.name).join(', ') || 'none'} · <Link to={`/companies?c=${cid}`}>edit</Link></div>
@@ -49,9 +50,9 @@ function Setup({ cid, onDone }) {
 export default function Entry() {
   const params = useParams();
   const nav = useNavigate();
-  const { user, nodes, view, canEnter, notify, isAdmin } = useApp();
+  const { user, nodes, view, canPrepare, notify, loadInbox } = useApp();
   let cid = Number(params.cid) || null;
-  if (!cid) cid = user.role === 'company' ? user.node_id : [...nodes.values()].find((n) => n.type === 'company' && canEnter(n.id))?.id || null;
+  if (!cid) cid = [...nodes.values()].find((n) => n.type === 'company' && canPrepare(n.id))?.id || [...nodes.values()].find((n) => n.type === 'company')?.id || null;
   const week = params.week || view.week;
 
   const [d, setD] = useState(null);
@@ -62,8 +63,7 @@ export default function Entry() {
   const [openAdj, setOpenAdj] = useState(() => new Set());
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [ask, setAsk] = useState(null);
-  const [hist, setHist] = useState(null);
+  const [ask, setAsk] = useState(false);
   const refs = useRef({});
   const timer = useRef(null);
   const url = cid && week ? `/report/${cid}/${week}` : null;
@@ -87,7 +87,6 @@ export default function Entry() {
     if (dirty && !window.confirm('Discard unsaved figures?')) return;
     nav(`/enter/${c}/${w}`);
   };
-
   const change = (fn) => {
     setS((cur) => {
       const next = fn(structuredClone(cur));
@@ -103,25 +102,25 @@ export default function Entry() {
   const noteCodes = useMemo(() => new Set((d?.lines || []).filter((l) => l.note_required).map((l) => l.code)), [d]);
   const isInput = (code) => inputCodes.has(code) || /^SKU:\d+:(PQ|SQ|SV)$/.test(code);
   const sections = pv?.[month] || null;
-  const order = useMemo(() => (sections ? sections.flatMap((x) => x.rows).filter((r) => r.code && isInput(r.code)).map((r) => r.code) : []), [sections]); // eslint-disable-line react-hooks/exhaustive-deps
+  const order = useMemo(() => (sections ? sections.flatMap((x) => x.rows).filter((r) => r.code && isInput(r.code) && !r.strong).map((r) => r.code) : []), [sections]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const save = async () => {
     setBusy(true);
     try { await api.put(url, toNum(s)); notify('Saved'); setDirty(false); } catch (e) { notify(e.message, 'err'); } finally { setBusy(false); }
   };
-  const file = async () => {
+  const submit = async () => {
     setBusy(true);
-    try { const r = await api.post(`${url}/file`, toNum(s)); notify(`Filed · rev ${r.revision}`); await load(); } catch (e) { notify(e.message, 'err'); } finally { setBusy(false); }
+    try { const r = await api.post(`${url}/submit`, toNum(s)); notify(`Submitted · rev ${r.revision}`); loadInbox(); await load(); } catch (e) { notify(e.message, 'err'); throw e; } finally { setBusy(false); }
   };
 
   const onKey = (e, code, m) => {
-    const segIdx = segs.findIndex((x) => x.month === m);
+    const si = segs.findIndex((x) => x.month === m);
     const i = order.indexOf(code);
     const focus = (c2, m2) => refs.current[`${c2}|${m2}`]?.focus();
     if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); if (order[i + 1]) focus(order[i + 1], m); }
     if (e.key === 'ArrowUp') { e.preventDefault(); if (order[i - 1]) focus(order[i - 1], m); }
-    if (e.key === 'ArrowRight' && segs[segIdx + 1] && e.target.selectionStart === e.target.value.length) focus(code, segs[segIdx + 1].month);
-    if (e.key === 'ArrowLeft' && segIdx > 0 && e.target.selectionStart === 0) focus(code, segs[segIdx - 1].month);
+    if (e.key === 'ArrowRight' && segs[si + 1] && e.target.selectionStart === e.target.value.length) focus(code, segs[si + 1].month);
+    if (e.key === 'ArrowLeft' && si > 0 && e.target.selectionStart === 0) focus(code, segs[si - 1].month);
   };
   const onPaste = (e, code, m) => {
     const parts = e.clipboardData.getData('text').split(/\r?\n/).filter((x, i, a) => x !== '' || i < a.length - 1);
@@ -144,41 +143,43 @@ export default function Entry() {
       <NodeSelect value={cid} companiesOnly onChange={(c) => go(c, week)} />
       <WeekSelect value={week} onChange={(w) => go(cid, w)} from={d?.setup?.start_week} />
       {segs.length > 1 && <Seg value={month} options={segs.map((x) => [x.month, `MTD ${x.label}`])} onChange={setMonth} />}
-      <span className="sp" />
-      {d?.revision > 0 && <button onClick={async () => setHist(await api.get(`${url}/history`))}>History</button>}
     </div>
   );
 
-  if (!cid) return <>{top}<div className="empty">No company assigned.</div></>;
+  if (!cid) return <>{top}<div className="empty">No company in your scope.</div></>;
   if (err) return <>{top}<div className="note err">{err}</div></>;
   if (!d || !s) return <>{top}<Loading /></>;
 
   const ed = d.editable;
-  const fileBlock = d.not_ended ? 'Week not ended' : d.unfiled.length ? `File first: ${d.unfiled.join(', ')}` : '';
+  const block = d.not_ended ? 'Week not ended' : d.unfiled.length ? `Earlier weeks pending: ${d.unfiled.join(', ')}` : '';
   const cols = 1 + segs.length + 9 + 2;
 
   return (
     <>
       {top}
       <div className="title">
+        <Logo node={d.company} />
         <h1>{d.company.name}</h1>
-        <span className="meta">{d.week.label} · due {d.due} · {STATUS[d.status]}{d.revision ? ` · rev ${d.revision}` : ''}</span>
-        <span className="sp" />
-        {d.can_reopen && <button onClick={() => setAsk('reopen')}>Reopen</button>}
+        <span className="meta">{d.week.label}{d.revision ? ` · rev ${d.revision}` : ''}</span>
       </div>
+      <div className="small mute">
+        {!['new', 'draft'].includes(d.status) ? '' : d.month_end_week ? 'Month-end week · open until month close' : d.cutoff ? `Entry closes ${when(d.cutoff)}` : ''}
+      </div>
+      <Workflow base={url} status={d.status} reopened={d.reopened} actions={d.actions} log={d.log} onDone={load} />
 
       {d.needs_setup || d.before_start ? (
-        canEnter(cid) || isAdmin ? <Setup cid={cid} onDone={load} /> : <div className="empty">Reporting not started.</div>
+        canPrepare(cid) ? <OpeningSetup cid={cid} onDone={load} /> : <div className="empty">Reporting not started.</div>
       ) : (
         <>
-          {d.status === 'reopened' && <div className="note warn">Reopened · group figures still use rev {d.revision} until filed again</div>}
-          {d.status !== 'filed' && d.unfiled.length > 0 && <div className="note warn">Earlier weeks not filed: {d.unfiled.map((w) => <Link key={w} to={`/enter/${cid}/${w}`} style={{ marginRight: 8 }}>{w}</Link>)}</div>}
+          {d.status === 'lapsed' && <div className="note err">{d.offline_after_cutoff ? 'Past the cut-off · saving offline · needs group reviewer to reopen before submitting' : 'Not reported by the cut-off · counted as no figures · saved figures are kept for reopening'}</div>}
+          {d.status === 'reopened' && <div className="note warn">Reopened for entry. Group figures keep the last submitted version until this is submitted.</div>}
+          {d.month_locked && d.status !== 'lapsed' && <div className="note">Month closed.</div>}
           {!sections ? <Loading /> : (
             <div className="wrap entry">
               <table className="r">
                 <thead>
                   <tr className="g">
-                    <th className="l" />
+                    <th className="l first" />
                     <th colSpan={segs.length} className="gap">This week</th>
                     <th colSpan={3} className="gap">Week</th>
                     <th colSpan={3} className="gap">MTD · {monthName(month)}</th>
@@ -187,7 +188,7 @@ export default function Entry() {
                     <th />
                   </tr>
                   <tr>
-                    <th className="l" style={{ minWidth: 230 }} />
+                    <th className="l first" style={{ minWidth: 210 }} />
                     {segs.map((x, i) => <th key={x.month} className={i === 0 ? 'gap' : ''}>{x.label}</th>)}
                     <th className="gap">Total</th><th>Target</th><th>%</th>
                     <th className="gap">Actual</th><th>Target</th><th>%</th>
@@ -198,9 +199,9 @@ export default function Entry() {
                 <tbody>
                   {sections.map((sec) => (
                     <Fragment key={sec.code}>
-                      <tr className="sec"><td colSpan={cols}>{sec.name}</td></tr>
+                      <tr className="sec"><td colSpan={cols} className="first">{sec.name}</td></tr>
                       {sec.rows.map((x, i) => {
-                        if (x.group) return <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l" style={{ paddingLeft: 8 }}>{x.name}</td></tr>;
+                        if (x.group) return <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l first">{x.name}</td></tr>;
                         const inp = isInput(x.code) && !x.strong;
                         const fmt = x.fmt;
                         const op = x.nature === 'opening';
@@ -209,8 +210,8 @@ export default function Entry() {
                         const lw = d.last_week?.values?.[x.code];
                         return (
                           <Fragment key={x.code}>
-                            <tr className={x.strong ? 'tot' : ''}>
-                              <td className="l" style={{ paddingLeft: 8 + x.depth * 16 }}>{x.name}</td>
+                            <tr className={x.grand ? 'grand' : x.strong ? 'tot' : ''}>
+                              <td className="l first" style={{ paddingLeft: 8 + x.depth * 16 }}>{x.name}</td>
                               {segs.map((g, j) => (
                                 <td key={g.month} className={`n ${j === 0 ? 'gap' : ''}`}>
                                   {inp && ed ? (
@@ -237,11 +238,9 @@ export default function Entry() {
                             </tr>
                             {inp && showAdj && (
                               <tr className="adj">
-                                <td className="l small" style={{ paddingLeft: 24 + x.depth * 16 }}>{noteCodes.has(x.code) ? 'Explanation' : 'Prior-week adjustment'}</td>
+                                <td className="l small first" style={{ paddingLeft: 24 + x.depth * 16 }}>{noteCodes.has(x.code) ? 'Explanation' : 'Prior-week adjustment'}</td>
                                 {noteCodes.has(x.code) ? (
-                                  <td colSpan={segs.length + 10}>
-                                    <input className="t" disabled={!ed} value={s.notes[x.code] || ''} onChange={(e) => change((st) => { st.notes[x.code] = e.target.value; return st; })} />
-                                  </td>
+                                  <td colSpan={segs.length + 10}><input className="t" disabled={!ed} value={s.notes[x.code] || ''} onChange={(e) => change((st) => { st.notes[x.code] = e.target.value; return st; })} /></td>
                                 ) : (
                                   <>
                                     <td className="n gap">
@@ -267,32 +266,19 @@ export default function Entry() {
             </div>
           )}
           <div className="row" style={{ marginTop: 16, alignItems: 'flex-end' }}>
-            <label className="f" style={{ flex: 1, minWidth: 300 }}>Remarks
+            <label className="f" style={{ flex: 1, minWidth: 260 }}>Remarks
               <textarea rows={2} disabled={!ed} value={s.remarks} onChange={(e) => { setS({ ...s, remarks: e.target.value }); setDirty(true); }} />
             </label>
             {ed && <>
               <button onClick={save} disabled={busy}>Save draft{dirty ? ' •' : ''}</button>
-              <button className="dark" onClick={() => setAsk('file')} disabled={busy || !!fileBlock} title={fileBlock}>{d.status === 'reopened' ? 'Refile' : 'File'}</button>
+              <button className="dark" onClick={() => setAsk(true)} disabled={busy || !!block} title={block}>Submit</button>
             </>}
           </div>
-          {ed && fileBlock && <div className="small mute" style={{ marginTop: 6, textAlign: 'right' }}>{fileBlock}</div>}
+          {ed && block && <div className="small mute" style={{ marginTop: 6, textAlign: 'right' }}>{block}</div>}
         </>
       )}
-
-      {ask === 'file' && <Ask title={`File ${d.company.name} · ${d.week.key}?`} okText="File" onClose={() => setAsk(null)} onOk={file} />}
-      {ask === 'reopen' && <Ask title="Reopen" label="Reason" okText="Reopen" onClose={() => setAsk(null)}
-        onOk={async (reason) => { try { await api.post(`${url}/reopen`, { reason }); await load(); } catch (e) { notify(e.message, 'err'); } }} />}
-      {hist && (
-        <Modal title={`${d.company.name} · ${d.week.key}`} wide onClose={() => setHist(null)}>
-          <table className="r">
-            <thead><tr><th className="l" />{hist.filings.map((f) => <th key={f.revision}>rev {f.revision}<br /><span className="mute">{f.filed_at.slice(0, 16)}{f.filed_by ? ` · ${f.filed_by}` : ''}</span></th>)}</tr></thead>
-            <tbody>{hist.items.filter((it) => hist.filings.some((f) => f.totals[it.key] != null)).map((it) => (
-              <tr key={it.key}><td className="l">{it.label}</td>{hist.filings.map((f) => <td key={f.revision} className="n">{fv(f.totals[it.key], /:(PQ|SQ)$/.test(it.key) ? 'qty' : 'amount', '1')}</td>)}</tr>
-            ))}</tbody>
-          </table>
-          {hist.reopens.map((r, i) => <div key={i} className="small">{r.at} · {r.name}: {r.detail.reason}</div>)}
-        </Modal>
-      )}
+      {ask && <Ask title={`Submit ${d.company.name} · ${d.week.key}`} okText="Submit" onClose={() => setAsk(false)} onOk={submit} />}
+      {user && null}
     </>
   );
 }

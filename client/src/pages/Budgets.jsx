@@ -5,8 +5,8 @@ import { fv, parseNum, plainNum } from '../lib/format.js';
 import { NodeSelect, Seg, Loading } from '../ui.jsx';
 
 export default function Budgets() {
-  const { user, nodes, canEnter, notify } = useApp();
-  const [cid, setCid] = useState(() => (user.role === 'company' ? user.node_id : null));
+  const { nodes, notify } = useApp();
+  const [cid, setCid] = useState(null);
   const [fy, setFy] = useState(null);
   const [d, setD] = useState(null);
   const [annual, setAnnual] = useState({});
@@ -67,7 +67,7 @@ export default function Budgets() {
         <NodeSelect value={company} companiesOnly onChange={(c) => { if (!dirty || window.confirm('Discard changes?')) setCid(c); }} />
         <Seg value={d.fy} options={[d.fy - 1, d.fy, d.fy + 1].map((y) => [y, `FY${String(y).slice(2)}-${String(y + 1).slice(2)}`])} onChange={(y) => { if (!dirty || window.confirm('Discard changes?')) setFy(y); }} />
         <span className="sp" />
-        {ed && canEnter(company) !== undefined && <button className="dark" disabled={!dirty} onClick={save}>Save{dirty ? ' •' : ''}</button>}
+        {ed && <button className="dark" disabled={!dirty} onClick={save}>Save{dirty ? ' •' : ''}</button>}
       </div>
       <div className="title"><h1>{d.company.name}</h1><span className="meta">Budget {d.fy_label} · PKR / units</span></div>
       <div className="wrap entry" style={{ marginTop: 10 }}>

@@ -4,7 +4,7 @@ import { api, getToken, setToken } from './lib/api.js';
 const Ctx = createContext(null);
 export const useApp = () => useContext(Ctx);
 
-const VKEY = 'jwdash.v2';
+const VKEY = 'jwdash.v3';
 const loadView = () => { try { return JSON.parse(localStorage.getItem(VKEY)) || {}; } catch { return {}; } };
 
 export function AppProvider({ children }) {
@@ -13,6 +13,9 @@ export function AppProvider({ children }) {
   const [tree, setTree] = useState([]);
   const [periods, setPeriods] = useState(null);
   const [toast, setToast] = useState(null);
+  const [inbox, setInbox] = useState(null);
+  const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
+  const [sync, setSync] = useState(null);
   const [view, setViewState] = useState(() => ({ nodeId: null, week: null, month: null, unit: 'm', ...loadView() }));
 
   const notify = useCallback((msg, kind) => setToast({ msg, kind, id: Date.now() }), []);
@@ -21,14 +24,22 @@ export function AppProvider({ children }) {
     const t = setTimeout(() => setToast(null), toast.kind === 'err' ? 6000 : 2500);
     return () => clearTimeout(t);
   }, [toast]);
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
 
   const setView = useCallback((patch) => setViewState((v) => {
     const n = { ...v, ...patch };
-    localStorage.setItem(VKEY, JSON.stringify(n));
+    try { localStorage.setItem(VKEY, JSON.stringify(n)); } catch { /* ignore */ }
     return n;
   }), []);
 
   const loadTree = useCallback(async () => { const t = await api.get('/tree'); setTree(t); return t; }, []);
+  const loadInbox = useCallback(() => api.get('/inbox').then(setInbox).catch(() => {}), []);
 
   useEffect(() => {
     const out = () => setUser(null);
@@ -37,10 +48,18 @@ export function AppProvider({ children }) {
     return () => window.removeEventListener('jwdash:logout', out);
   }, []);
   useEffect(() => {
+    let t;
+    const poll = () => api.get('/sync/status').then((s) => { setSync(s); if (s.mode === 'node') t = setTimeout(poll, 8000); }).catch(() => {});
+    poll();
+    return () => clearTimeout(t);
+  }, []);
+  const syncNow = useCallback(async () => { try { setSync({ ...(await api.post('/sync/now')), mode: 'node', connected: true }); } catch { /* shown via status */ } }, []);
+  useEffect(() => {
     if (!user) return;
     loadTree().catch(() => {});
     api.get('/periods').then(setPeriods).catch(() => {});
-  }, [user, loadTree]);
+    loadInbox();
+  }, [user, loadTree, loadInbox]);
 
   const nodes = useMemo(() => {
     const map = new Map();
@@ -57,19 +76,19 @@ export function AppProvider({ children }) {
     setToken(r.token);
     setUser(r.user);
   };
-  const logout = () => { setToken(null); setUser(null); setTree([]); };
+  const logout = () => { setToken(null); setUser(null); setTree([]); setInbox(null); };
 
-  const canEnter = (cid) => {
+  const inScope = (cid) => {
     if (!user) return false;
-    if (user.role === 'admin') return true;
-    if (user.role !== 'company' && user.role !== 'cluster') return false;
-    for (let n = nodes.get(cid); n; n = n.parent) if (n.id === user.node_id) return true;
+    if (user.global) return true;
+    for (let n = nodes.get(cid); n; n = n.parent) if (user.scopes.some((s) => s.id === n.id)) return true;
     return false;
   };
+  const canPrepare = (cid) => !!user && (user.role === 'admin' || (user.role === 'company_dpo' && inScope(cid)));
 
   return (
     <Ctx.Provider value={{
-      user, booting, login, logout, tree, nodes, loadTree, periods, notify, canEnter,
+      user, booting, login, logout, tree, nodes, loadTree, periods, notify, canPrepare, inbox, loadInbox, online, sync, syncNow,
       view: { ...view, nodeId, week }, setView, isAdmin: user?.role === 'admin',
     }}>
       {children}

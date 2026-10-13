@@ -29,6 +29,13 @@ export function derive(m, base) {
     let v = null;
     if (l.kind === 'sum') {
       for (const c of l.children) v = addv(v, calc(c));
+    } else if (l.kind === 'cfnet') {
+      // net of lines tagged '+CLASS' (inflows) and '-CLASS' (outflows)
+      for (const x of m.list) {
+        if (!x.cf || x.cf.slice(1) !== l.formula) continue;
+        const xv = calc(x);
+        if (xv != null) v = addv(v, x.cf[0] === '-' ? -xv : xv);
+      }
     } else if (l.kind === 'formula') {
       if (l.ast) {
         let any = false;

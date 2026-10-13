@@ -3,3 +3,6 @@ server/data/*.db
 server/data/*.db-*
 client/dist/
 .env
+desktop/node_modules/
+desktop/app/
+desktop/release/

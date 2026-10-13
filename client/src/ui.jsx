@@ -1,14 +1,22 @@
 import { useEffect, useState } from 'react';
 import { useApp } from './store.jsx';
-import { STATUS, fv } from './lib/format.js';
+import { api } from './lib/api.js';
+import { fv } from './lib/format.js';
 
-export function NodeSelect({ value, onChange, companiesOnly, allowEmpty }) {
+export const STATUS = {
+  na: '', new: 'Not started', draft: 'Draft', submitted: 'Submitted', company_ok: 'Company approved',
+  cluster_ok: 'Cluster approved', approved: 'Approved', reopened: 'Reopened', lapsed: 'Lapsed – no figures',
+};
+const ACTION = { submit: 'Submitted', approve: 'Approved', reopen: 'Reopened' };
+const ROLE = { admin: 'Admin', executive: 'Executive', group_reviewer: 'Group reviewer', cluster_reviewer: 'Cluster reviewer', company_reviewer: 'Company reviewer', company_dpo: 'DPO' };
+
+export function NodeSelect({ value, onChange, companiesOnly, allowEmpty, filter }) {
   const { nodes } = useApp();
   return (
     <select value={value || ''} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}>
       {allowEmpty && <option value="">{allowEmpty}</option>}
-      {[...nodes.values()].filter((n) => !companiesOnly || n.type === 'company').map((n) => (
-        <option key={n.id} value={n.id}>{companiesOnly ? n.name : `${'   '.repeat(n.depth)}${n.name}`}</option>
+      {[...nodes.values()].filter((n) => (!companiesOnly || n.type === 'company') && (!filter || filter(n))).map((n) => (
+        <option key={n.id} value={n.id}>{companiesOnly ? n.name : `${'    '.repeat(n.depth)}${n.name}`}</option>
       ))}
     </select>
   );
@@ -30,29 +38,37 @@ export function MonthSelect({ value, onChange }) {
   const { periods } = useApp();
   if (!periods) return <select disabled />;
   return (
-    <select value={value || periods.current_month} onChange={(e) => onChange(e.target.value)}>
+    <select value={value || periods.last_month} onChange={(e) => onChange(e.target.value)}>
       {periods.months.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
     </select>
   );
 }
+
+export const Seg = ({ value, options, onChange }) => (
+  <span className="seg">{options.map(([v, l]) => <button key={v} type="button" className={v === value ? 'on' : ''} onClick={() => onChange(v)}>{l}</button>)}</span>
+);
 
 export function UnitSelect() {
   const { view, setView } = useApp();
   return <Seg value={view.unit === '1' ? '1' : 'm'} options={[['m', 'Millions'], ['1', 'Full']]} onChange={(u) => setView({ unit: u })} />;
 }
 
-// A reported figure: shows in the chosen unit, full amount on hover
 export const Num = ({ v, fmt, unit, className = '' }) => (
   <td className={`n ${className}`} title={v == null || fmt === 'percent' ? undefined : fv(v, fmt === 'qty' ? 'qty' : fmt, '1')}>{fv(v, fmt, unit)}</td>
 );
 
-export const Seg = ({ value, options, onChange }) => (
-  <span className="seg">{options.map(([v, l]) => <button key={v} type="button" className={v === value ? 'on' : ''} onClick={() => onChange(v)}>{l}</button>)}</span>
+export const St = ({ s, reopened, overdue }) => (
+  <span className={`st ${overdue ? 'lapsed' : s}`}>
+    {s !== 'na' && <i />}{STATUS[s] ?? s}{overdue ? ' · late' : ''}{reopened > 0 && s !== 'reopened' ? <sup title="Reopened earlier">R</sup> : null}
+  </span>
 );
 
-export const St = ({ s, overdue }) => (
-  <span><span className={`st ${overdue ? 'overdue' : s}`} />{overdue ? `${STATUS[s]} · late` : STATUS[s]}</span>
-);
+export function Logo({ node, size = '' }) {
+  const src = node?.logo || node?.meta?.logo;
+  if (src) return <img className={`logo ${size}`} src={src} alt="" />;
+  const ini = (node?.name || '?').split(/\s+/).filter((w) => /^[A-Za-z]/.test(w)).slice(0, 3).map((w) => w[0]).join('').toUpperCase();
+  return <span className={`logo ${size}`}>{ini}</span>;
+}
 
 export function Modal({ title, onClose, children, wide }) {
   useEffect(() => {
@@ -70,14 +86,44 @@ export function Modal({ title, onClose, children, wide }) {
   );
 }
 
-export function Ask({ title, label, onOk, onClose, okText = 'OK' }) {
+export function Ask({ title, label, onOk, onClose, okText = 'OK', required = true }) {
   const [v, setV] = useState('');
+  const [busy, setBusy] = useState(false);
   return (
     <Modal title={title} onClose={onClose}>
       {label && <label className="f">{label}<textarea rows={3} value={v} onChange={(e) => setV(e.target.value)} autoFocus /></label>}
       <div className="row"><span className="sp" /><button onClick={onClose}>Cancel</button>
-        <button className="dark" disabled={label && !v.trim()} onClick={async () => { await onOk(v); onClose(); }}>{okText}</button></div>
+        <button className="dark" disabled={busy || (label && required && !v.trim())}
+          onClick={async () => { setBusy(true); try { await onOk(v); onClose(); } catch { /* shown */ } finally { setBusy(false); } }}>{okText}</button></div>
     </Modal>
+  );
+}
+
+// Status + approve / reopen + audit trail for one weekly or monthly report
+export function Workflow({ base, status, reopened, actions = [], log = [], onDone }) {
+  const { notify, loadInbox } = useApp();
+  const [ask, setAsk] = useState(null);
+  const [showLog, setShowLog] = useState(false);
+  const run = async (action, comment) => {
+    try { await api.post(`${base}/${action}`, { comment }); notify(action === 'approve' ? 'Approved' : 'Reopened'); loadInbox(); onDone(); } catch (e) { notify(e.message, 'err'); throw e; }
+  };
+  return (
+    <div className="row" style={{ margin: '4px 0 12px' }}>
+      <St s={status} reopened={reopened} />
+      {log.length > 0 && <button className="link small" onClick={() => setShowLog(!showLog)}>{showLog ? 'hide trail' : `trail (${log.length})`}</button>}
+      <span className="sp" />
+      {actions.includes('approve') && <button className="dark" onClick={() => setAsk('approve')}>Approve</button>}
+      {actions.includes('reopen') && <button onClick={() => setAsk('reopen')}>Reopen for entry</button>}
+      {showLog && (
+        <div className="log" style={{ width: '100%' }}>
+          {log.map((l, i) => (
+            <div key={i}>{l.at.slice(0, 16)} · <b>{ACTION[l.action] || l.action}</b> by {l.name || '—'} ({ROLE[l.role] || l.role}){l.comment ? ` — ${l.comment}` : ''}</div>
+          ))}
+        </div>
+      )}
+      {ask === 'approve' && <Ask title="Approve" label="Comment" required={false} okText="Approve" onClose={() => setAsk(null)} onOk={(c) => run('approve', c)} />}
+      {ask === 'reopen' && <Ask title="Reopen for entry" label="Reason" okText="Reopen" onClose={() => setAsk(null)} onOk={(c) => run('reopen', c)} />}
+    </div>
   );
 }
 

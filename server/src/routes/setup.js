@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db, tx, audit, plain, plainAll } from '../db.js';
-import { requireRole, canView, canEnter } from '../auth.js';
+import { requireRole, canView, canPrepare } from '../auth.js';
 import { Engine, loadLines, loadSections, fyOf } from '../engine.js';
 import * as P from '../periods.js';
 import { h, bad, forbidden, notFound, num } from './util.js';
@@ -49,8 +49,11 @@ r.post('/lines', admin, h((req) => {
   const n = db.prepare('SELECT COUNT(*) c FROM lines').get().c + 1;
   const code = `${parent.code}_X${n}`;
   const sort = db.prepare('SELECT MAX(sort) s FROM lines WHERE parent_id = ?').get(parent.id).s || parent.sort - 5;
-  db.prepare(`INSERT INTO lines(code, name, section, parent_id, kind, nature, fmt, hib, budget, sort)
-    VALUES (?,?,?,?, 'input', 'flow', 'amount', ?, 1, ?)`).run(code, name, parent.section, parent.id, parent.hib, sort + 1);
+  // recoveries / payments need a cash-flow class so the monthly cash flow picks them up
+  const sign = parent.code === 'REC_TOT' ? '+' : parent.code === 'PAY_TOT' ? '-' : null;
+  const cls = ['OPS', 'INV', 'FIN'].includes(req.body?.cf) ? req.body.cf : 'OPS';
+  db.prepare(`INSERT INTO lines(code, name, section, parent_id, kind, scope, cf, nature, fmt, hib, budget, sort)
+    VALUES (?,?,?,?, 'input', ?, ?, 'flow', 'amount', ?, 1, ?)`).run(code, name, parent.section, parent.id, parent.scope, sign ? sign + cls : null, parent.hib, sort + 1);
   audit(req.user.id, 'line.create', 'line', null, { code, name });
   return { ok: true };
 }));
@@ -67,8 +70,8 @@ r.get('/companies/:id/setup', h((req) => {
   const filed = hasFilings(c.id);
   return {
     company: c, setup, filed,
-    can_edit_opening: req.user.role === 'admin' || (canEnter(req.user, c.id) && !filed),
-    can_edit_skus: canEnter(req.user, c.id),
+    can_edit_opening: req.user.role === 'admin' || (canPrepare(req.user, c.id) && !filed),
+    can_edit_skus: canPrepare(req.user, c.id),
     skus: skus.map((s) => ({ ...s, used: used.has(`SKU:${s.id}:PQ`) || used.has(`SKU:${s.id}:SQ`) || used.has(`SKU:${s.id}:SV`) })),
     suggested_start: P.lastClosedWeek(),
   };
@@ -77,7 +80,7 @@ r.get('/companies/:id/setup', h((req) => {
 r.put('/companies/:id/setup', h((req) => {
   const c = company(req.params.id);
   const filed = hasFilings(c.id);
-  if (!(req.user.role === 'admin' || (canEnter(req.user, c.id) && !filed))) throw forbidden('Opening balance is locked once reporting has started');
+  if (!(req.user.role === 'admin' || (canPrepare(req.user, c.id) && !filed))) throw forbidden('Opening balance is locked once reporting has started');
   const start = String(req.body?.start_week || '');
   if (!P.isWeek(start)) throw bad('Pick the first reporting week');
   const opening = num(req.body?.opening_cash);
@@ -95,7 +98,7 @@ r.put('/companies/:id/setup', h((req) => {
 
 r.put('/companies/:id/skus', h((req) => {
   const c = company(req.params.id);
-  if (!canEnter(req.user, c.id)) throw forbidden();
+  if (!canPrepare(req.user, c.id)) throw forbidden();
   const list = Array.isArray(req.body?.skus) ? req.body.skus : null;
   if (!list) throw bad('skus[] required');
   const seen = new Set();
@@ -137,7 +140,7 @@ r.get('/budgets/:id', h((req) => {
   const items = eng.budgetItems(c.id).map((k) => {
     const sku = /^SKU:\d+:(PQ|SQ|SV)$/.exec(k);
     const line = eng.m.byCode.get(k);
-    return { key: k, label: eng.itemLabel(k), qty: !!sku && sku[1] !== 'SV', section: line ? line.section : 'PRODSALES' };
+    return { key: k, label: eng.itemLabel(k), qty: !!sku && sku[1] !== 'SV', section: line ? line.section : 'PRODSALES', scope: line ? line.scope : 'week' };
   });
   const annual = {};
   for (const b of plainAll(db.prepare('SELECT * FROM budget_annual WHERE company_id = ? AND fy = ?').all(c.id, fy))) annual[b.item] = b.value;
@@ -150,13 +153,13 @@ r.get('/budgets/:id', h((req) => {
   return {
     company: c, fy, fy_label: P.fyLabel(months[0], eng.fyStartMonth), months: months.map((m) => ({ key: m, label: P.monthLabel(m), days: P.daysInMonth(m) })),
     sections: eng.sections, items, annual, specific, spread,
-    editable: req.user.role === 'admin' || canEnter(req.user, c.id),
+    editable: req.user.role === 'admin' || canPrepare(req.user, c.id),
   };
 }));
 
 r.put('/budgets/:id', h((req) => {
   const c = company(req.params.id);
-  if (!(req.user.role === 'admin' || canEnter(req.user, c.id))) throw forbidden();
+  if (!(req.user.role === 'admin' || canPrepare(req.user, c.id))) throw forbidden();
   const eng = new Engine();
   const fy = Number(req.body?.fy);
   if (!fy) throw bad('fy required');

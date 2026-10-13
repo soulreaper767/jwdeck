@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { db, getSettings } from '../db.js';
-import { sign, requireAuth } from '../auth.js';
-import { loadTree, pathOf } from '../engine.js';
+import { sign, requireAuth, loadUser, ROLES, isGlobal } from '../auth.js';
+import { loadTree } from '../engine.js';
 import { h, bad } from './util.js';
 
 const r = Router();
@@ -15,9 +15,11 @@ function publicSettings() {
 
 function profile(u) {
   const tree = loadTree();
+  const full = loadUser(u.id);
   return {
-    id: u.id, name: u.name, email: u.email, role: u.role, node_id: u.node_id,
-    scope: u.node_id ? pathOf(tree, u.node_id) : [],
+    id: full.id, name: full.name, email: full.email, role: full.role, role_label: ROLES[full.role], title: full.title,
+    scopes: full.scopes.map((id) => ({ id, name: tree.byId.get(id)?.name, type: tree.byId.get(id)?.type })),
+    global: isGlobal(full),
     settings: publicSettings(),
   };
 }

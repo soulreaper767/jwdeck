@@ -9,7 +9,10 @@
     "build": "npm --prefix client run build",
     "start": "npm --prefix server start",
     "seed": "npm --prefix server run seed",
-    "seed:demo": "npm --prefix server run seed:demo"
+    "seed:demo": "npm --prefix server run seed:demo",
+    "desktop:install": "npm --prefix desktop install",
+    "desktop:run": "npm --prefix desktop start",
+    "desktop:build": "npm --prefix desktop run dist"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

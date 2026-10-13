@@ -28,9 +28,10 @@ CREATE TABLE IF NOT EXISTS nodes (
 
 -- Reporting packs and their standard lines (same for every company)
 CREATE TABLE IF NOT EXISTS sections (
-  code TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  sort INTEGER NOT NULL DEFAULT 0
+  code  TEXT PRIMARY KEY,
+  name  TEXT NOT NULL,
+  scope TEXT NOT NULL DEFAULT 'week' CHECK (scope IN ('week','month')),
+  sort  INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS lines (
@@ -39,7 +40,9 @@ CREATE TABLE IF NOT EXISTS lines (
   name          TEXT NOT NULL,
   section       TEXT NOT NULL REFERENCES sections(code),
   parent_id     INTEGER REFERENCES lines(id),
-  kind          TEXT NOT NULL CHECK (kind IN ('input','sku_total','opening','sum','formula')),
+  kind          TEXT NOT NULL CHECK (kind IN ('input','sku_total','opening','sum','formula','cfnet','link')),
+  scope         TEXT NOT NULL DEFAULT 'week' CHECK (scope IN ('week','month')),
+  cf            TEXT,
   formula       TEXT,
   nature        TEXT NOT NULL DEFAULT 'flow' CHECK (nature IN ('flow','opening','closing')),
   fmt           TEXT NOT NULL DEFAULT 'amount' CHECK (fmt IN ('amount','percent')),
@@ -92,8 +95,9 @@ CREATE TABLE IF NOT EXISTS reports (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   company_id INTEGER NOT NULL REFERENCES nodes(id),
   week_key   TEXT NOT NULL,
-  status     TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','filed','reopened')),
+  status     TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','company_ok','cluster_ok','approved','reopened')),
   revision   INTEGER NOT NULL DEFAULT 0,
+  reopened   INTEGER NOT NULL DEFAULT 0,
   remarks    TEXT,
   updated_by INTEGER,
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -130,9 +134,58 @@ CREATE TABLE IF NOT EXISTS filings (
   currency   TEXT NOT NULL,
   data_json  TEXT NOT NULL,
   filed_by   INTEGER,
+  filed_by_email TEXT,
   filed_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE (company_id, week_key, revision)
 );
+
+-- Month close: P&L inputs per company per month (everything else compiles from the weeks)
+CREATE TABLE IF NOT EXISTS month_reports (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  company_id INTEGER NOT NULL REFERENCES nodes(id),
+  month_key  TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','submitted','company_ok','cluster_ok','approved','reopened')),
+  revision   INTEGER NOT NULL DEFAULT 0,
+  reopened   INTEGER NOT NULL DEFAULT 0,
+  remarks    TEXT,
+  updated_by INTEGER,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (company_id, month_key)
+);
+CREATE TABLE IF NOT EXISTS month_values (
+  report_id INTEGER NOT NULL REFERENCES month_reports(id) ON DELETE CASCADE,
+  item      TEXT NOT NULL,
+  value     REAL,
+  PRIMARY KEY (report_id, item)
+);
+CREATE TABLE IF NOT EXISTS month_filings (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  report_id  INTEGER NOT NULL REFERENCES month_reports(id),
+  company_id INTEGER NOT NULL REFERENCES nodes(id),
+  month_key  TEXT NOT NULL,
+  revision   INTEGER NOT NULL,
+  data_json  TEXT NOT NULL,
+  filed_by   INTEGER,
+  filed_by_email TEXT,
+  filed_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (company_id, month_key, revision)
+);
+
+CREATE TABLE IF NOT EXISTS workflow_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  kind        TEXT NOT NULL CHECK (kind IN ('week','month')),
+  company_id  INTEGER NOT NULL,
+  period      TEXT NOT NULL,
+  action      TEXT NOT NULL,
+  from_status TEXT,
+  to_status   TEXT,
+  user_id     INTEGER,
+  user_email  TEXT,
+  user_name   TEXT,
+  comment     TEXT,
+  at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_wf ON workflow_log(kind, company_id, period);
 
 CREATE TABLE IF NOT EXISTS fx_rates (
   currency  TEXT NOT NULL,
@@ -146,10 +199,17 @@ CREATE TABLE IF NOT EXISTS users (
   name          TEXT NOT NULL,
   email         TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
-  role          TEXT NOT NULL CHECK (role IN ('admin','executive','cluster','company')),
-  node_id       INTEGER REFERENCES nodes(id),
+  role          TEXT NOT NULL CHECK (role IN ('admin','executive','group_reviewer','cluster_reviewer','company_reviewer','company_dpo')),
+  title         TEXT,
   active        INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Which nodes a user covers (none = whole group for group-level roles)
+CREATE TABLE IF NOT EXISTS user_scopes (
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  node_id INTEGER NOT NULL REFERENCES nodes(id),
+  PRIMARY KEY (user_id, node_id)
 );
 
 CREATE TABLE IF NOT EXISTS audit (
@@ -168,6 +228,9 @@ const DEFAULT_SETTINGS = {
   group_currency: 'PKR',
   fiscal_year_start_month: '7',
   week_due_days: '1',
+  month_due_days: '10',
+  week_cutoff_hour: '11',
+  tz_offset_hours: '5',
 };
 const insSetting = db.prepare('INSERT OR IGNORE INTO settings(key, value) VALUES (?, ?)');
 for (const [k, v] of Object.entries(DEFAULT_SETTINGS)) insSetting.run(k, v);
@@ -178,8 +241,12 @@ export function getSettings() {
   return out;
 }
 
+// Re-entrant: nested calls join the outer transaction
+let depth = 0;
 export function tx(fn) {
+  if (depth > 0) return fn();
   db.exec('BEGIN');
+  depth++;
   try {
     const r = fn();
     db.exec('COMMIT');
@@ -187,6 +254,8 @@ export function tx(fn) {
   } catch (e) {
     db.exec('ROLLBACK');
     throw e;
+  } finally {
+    depth--;
   }
 }
 

@@ -1,0 +1,50 @@
+{
+  "name": "jw-dash-desktop",
+  "productName": "JW Dash",
+  "version": "1.0.0",
+  "description": "JW Dash desktop: works offline and syncs with the JW Dash server",
+  "author": "JW Group",
+  "main": "main.cjs",
+  "private": true,
+  "scripts": {
+    "prep": "node prep.cjs",
+    "start": "node prep.cjs && electron .",
+    "dist": "node prep.cjs && electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "38.8.6",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "com.jwgroup.jwdash",
+    "productName": "JW Dash",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.cjs",
+      "package.json"
+    ],
+    "asar": false,
+    "win": {
+      "target": "nsis",
+      "icon": "icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "JW Dash"
+    },
+    "extraResources": [
+      {
+        "from": "app",
+        "to": "jwapp",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ]
+  }
+}
