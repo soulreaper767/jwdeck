@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { db, tx, audit, plain, plainAll } from '../db.js';
 import { requireRole, canView, canPrepare } from '../auth.js';
-import { Engine, loadLines, loadSections, fyOf } from '../engine.js';
+import { Engine, loadLines, loadSections, fyOf, companiesUnder } from '../engine.js';
+import { derive, addv } from '../calc.js';
 import * as P from '../periods.js';
 import { h, bad, forbidden, notFound, num } from './util.js';
 
@@ -154,6 +155,54 @@ r.get('/budgets/:id', h((req) => {
     company: c, fy, fy_label: P.fyLabel(months[0], eng.fyStartMonth), months: months.map((m) => ({ key: m, label: P.monthLabel(m), days: P.daysInMonth(m) })),
     sections: eng.sections, items, annual, specific, spread,
     editable: req.user.role === 'admin' || canPrepare(req.user, c.id),
+  };
+}));
+
+// Consolidated budget: every company's monthly budget summed, SKUs rolled up to unit totals, totals recalculated
+r.get('/budgets-node/:id', h((req) => {
+  const eng = new Engine();
+  const node = eng.tree.byId.get(Number(req.params.id));
+  if (!node) throw notFound();
+  if (!canView(req.user, node.id, eng.tree)) throw forbidden();
+  const fy = Number(req.query.fy) || fyOf(P.monthOfDate(new Date()), eng.fyStartMonth);
+  const months = P.fyAllMonths(fy, eng.fyStartMonth);
+  const companies = companiesUnder(eng.tree, node.id);
+  const companyVec = (c, mo) => {
+    const v = {};
+    for (const item of eng.budgetItems(c.id)) { const b = eng.budget(c.id, mo, item); if (b != null) v[item] = b; }
+    eng.addSkuTotal(v);
+    return v;
+  };
+  const collapse = (vec, into) => {
+    for (const [k, v] of Object.entries(vec)) {
+      const key = eng.collapseKey(k);
+      if (key) into[key] = addv(into[key] ?? null, v);
+      const part = /^SKU:[0-9]+:(PQ|SQ)$/.exec(k)?.[1];
+      if (part) into[`ALL:${part}`] = addv(into[`ALL:${part}`] ?? null, v);
+    }
+    return into;
+  };
+  const base = months.map((mo) => companies.reduce((acc, c) => collapse(companyVec(c, mo), acc), {}));
+  const annualBase = base.reduce((acc, v) => { for (const [k, x] of Object.entries(v)) acc[k] = addv(acc[k] ?? null, x); return acc; }, {});
+  // link lines (P&L net revenue) take their weekly source line
+  const links = eng.lines.filter((l) => l.kind === 'link');
+  const full = (v) => { const b = { ...v }; const d1 = derive(eng.m, b); for (const l of links) if (d1[l.formula] != null) b[l.code] = d1[l.formula]; return { ...b, ...derive(eng.m, b) }; };
+  const D = base.map(full);
+  const A = full(annualBase);
+  const mk = (code, name, extra = {}) => ({ code, name, fmt: 'amount', depth: 0, ...extra, months: D.map((x) => x[code] ?? null), annual: A[code] ?? null });
+  // balances need actual opening cash, so they are left out of a budget view
+  const NO = new Set(['CB_OPEN', 'CB_CLOSE', 'CF_OPEN', 'CF_CLOSE']);
+  const sections = eng.sectionsFor(null, mk, null, [A]).map((s) => ({ ...s, rows: s.rows.filter((x) => !x.code || !NO.has(x.code)) }));
+  const KEYS = [['REV_NET', 'Net revenue'], ['REC_TOT', 'Recoveries'], ['PAY_TOT', 'Payments'], ['BD_CONF', 'Orders confirmed'], ['PL_GP', 'Gross profit'], ['PL_EBITDA', 'EBITDA'], ['PL_NP', 'Net profit']];
+  const byCompany = companies.map((c) => {
+    const sum = months.reduce((acc, mo) => { for (const [k, x] of Object.entries(companyVec(c, mo))) acc[k] = addv(acc[k] ?? null, x); return acc; }, {});
+    const dv = full(sum);
+    return { id: c.id, name: c.name, values: Object.fromEntries(KEYS.map(([k]) => [k, dv[k] ?? null])) };
+  });
+  return {
+    node: { id: node.id, name: node.name, type: node.type, meta: node.meta }, fy, fy_label: P.fyLabel(months[0], eng.fyStartMonth),
+    months: months.map((m) => ({ key: m, label: P.monthLabel(m), days: P.daysInMonth(m) })),
+    sections, keys: KEYS.map(([code, name]) => ({ code, name })), by_company: byCompany,
   };
 }));
 

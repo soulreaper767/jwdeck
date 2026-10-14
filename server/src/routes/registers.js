@@ -4,6 +4,7 @@ import { Router } from 'express';
 import crypto from 'node:crypto';
 import { db, audit, plainAll } from '../db.js';
 import { canView, canPrepare } from '../auth.js';
+import { loadTree, companiesUnder } from '../engine.js';
 import * as P from '../periods.js';
 import { h, bad, forbidden, notFound, num } from './util.js';
 
@@ -85,6 +86,23 @@ r.delete('/inits/:cid/:uid', h((req) => {
   if (!canPrepare(req.user, c.id)) throw forbidden();
   db.prepare('UPDATE initiatives SET deleted = 1, updated_at = ? WHERE uid = ? AND company_id = ?').run(now(), req.params.uid, c.id);
   return { ok: true };
+}));
+
+// ---------------------------------------------------------------- consolidated (cluster / group), read-only
+r.get('/registers/:kind(opps|inits)/node/:id', h((req) => {
+  const tree = loadTree();
+  const node = tree.byId.get(Number(req.params.id));
+  if (!node) throw notFound();
+  if (!canView(req.user, node.id, tree)) throw forbidden();
+  const companies = companiesUnder(tree, node.id);
+  const ids = companies.map((c) => c.id);
+  if (!ids.length) return { node: { id: node.id, name: node.name, type: node.type }, rows: [], companies: [] };
+  const table = req.params.kind === 'opps' ? 'opportunities' : 'initiatives';
+  const order = req.params.kind === 'opps' ? 'created_on DESC' : 'start_date DESC';
+  const name = new Map(companies.map((c) => [c.id, c.name]));
+  const rows = plainAll(db.prepare(`SELECT * FROM ${table} WHERE deleted = 0 AND company_id IN (${ids.map(() => '?').join(',')}) ORDER BY ${order}, id DESC`).all(...ids))
+    .map((x) => ({ ...x, company: name.get(x.company_id) }));
+  return { node: { id: node.id, name: node.name, type: node.type, meta: node.meta }, rows, companies: companies.map((c) => ({ id: c.id, name: c.name })), stages: STAGES, statuses: STATUSES };
 }));
 
 // ---------------------------------------------------------------- weekly figures from the registers

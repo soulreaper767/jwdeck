@@ -3,7 +3,7 @@ import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell, LabelL
 import { useApp } from '../store.jsx';
 import { api } from '../lib/api.js';
 import { fv, parseNum, plainNum } from '../lib/format.js';
-import { NodeSelect, Seg, Loading, Modal, Logo } from '../ui.jsx';
+import { NodeSelect, Seg, Loading, Modal, Logo, PrintButton, PrintHeader } from '../ui.jsx';
 import { C, KpiCard, ChartCard } from './Overview.jsx';
 
 const STAGE = { lead: 'Lead', proposal: 'Proposal', negotiation: 'Negotiation', awaiting: 'Awaiting confirmation', won: 'Won', lost: 'Lost' };
@@ -12,11 +12,25 @@ const STATUS = { planned: 'Planned', in_progress: 'In progress', done: 'Done', d
 const STATUS_C = { planned: '#9AA5CE', in_progress: '#118DFF', done: C.pos, dropped: '#A19F9D' };
 const today = () => new Date().toISOString().slice(0, 10);
 
-function useCompany() {
-  const { nodes, canPrepare } = useApp();
-  const first = [...nodes.values()].find((n) => n.type === 'company' && canPrepare(n.id))?.id || [...nodes.values()].find((n) => n.type === 'company')?.id;
-  const [cid, setCid] = useState(null);
-  return [cid || first, setCid];
+// selected node: a company (editable register) or a cluster / group (consolidated, read-only)
+function useNode() {
+  const { nodes, view, user } = useApp();
+  const fallback = user.role === 'company_dpo' || user.role === 'company_reviewer'
+    ? [...nodes.values()].find((n) => n.type === 'company')?.id : view.nodeId;
+  const [id, setId] = useState(null);
+  const sel = id || fallback;
+  return [sel, setId, nodes.get(sel)?.type === 'company'];
+}
+
+// load either one company's register or the consolidated one
+function useRegister(kind, id, isCompany, notify) {
+  const [d, setD] = useState(null);
+  const load = useCallback(() => {
+    if (!id) return;
+    api.get(isCompany ? `/${kind}/${id}` : `/registers/${kind}/node/${id}`).then((r) => setD({ ...r, consolidated: !isCompany, company: r.company || r.node })).catch((e) => notify(e.message, 'err'));
+  }, [kind, id, isCompany, notify]);
+  useEffect(() => { setD(null); load(); }, [load]);
+  return [d, load];
 }
 
 function OppForm({ init, onClose, onSave }) {
@@ -43,14 +57,12 @@ function OppForm({ init, onClose, onSave }) {
 
 export function Pipeline() {
   const { notify, view } = useApp();
-  const [cid, setCid] = useCompany();
-  const [d, setD] = useState(null);
+  const [cid, setCid, isCompany] = useNode();
+  const [d, load] = useRegister('opps', cid, isCompany, notify);
   const [form, setForm] = useState(null);
   const [filter, setFilter] = useState('open');
-  const load = useCallback(() => cid && api.get(`/opps/${cid}`).then(setD).catch((e) => notify(e.message, 'err')), [cid, notify]);
-  useEffect(() => { load(); }, [load]);
   const unit = view.unit;
-  if (!d) return <><div className="bar"><NodeSelect value={cid} companiesOnly onChange={setCid} /></div><Loading /></>;
+  if (!d) return <><div className="bar"><NodeSelect value={cid} onChange={setCid} /></div><Loading /></>;
 
   const rows = d.rows;
   const open = rows.filter((r) => !['won', 'lost'].includes(r.stage));
@@ -67,12 +79,14 @@ export function Pipeline() {
   return (
     <>
       <div className="bar">
-        <NodeSelect value={cid} companiesOnly onChange={setCid} />
+        <NodeSelect value={cid} onChange={setCid} />
         <span className="sp" />
         {d.editable && <button className="dark" onClick={() => setForm({})}>New opportunity</button>}
+        <PrintButton />
       </div>
       <div className="dash">
-        <div className="title"><Logo node={d.company} /><h1>{d.company.name}</h1><span className="meta">Pipeline</span></div>
+        <PrintHeader node={d.company} title={d.consolidated ? 'Consolidated pipeline' : 'Pipeline'} />
+        <div className="title"><Logo node={d.company} /><h1>{d.company.name}</h1><span className="meta">{d.consolidated ? 'Consolidated pipeline' : 'Pipeline'}</span></div>
         <div className="kgrid">
           <KpiCard title="Open pipeline" actual={sum(open)} unit={unit} foot={`${open.length} opportunities · weighted ${fv(weighted, 'amount', unit)}`} />
           <KpiCard title="Awaiting confirmation" actual={sum(rows.filter((r) => r.stage === 'awaiting'))} unit={unit} foot={`${rows.filter((r) => r.stage === 'awaiting').length} orders`} />
@@ -80,6 +94,23 @@ export function Pipeline() {
           <KpiCard title="Win rate" actual={winRate} fmt="percent" unit={unit} foot={`${closed.length} closed`} />
         </div>
         <div className="cgrid" style={{ marginTop: 16 }}>
+          {d.consolidated && d.companies.length > 0 && (
+            <ChartCard title="Open pipeline by company" sub="Open value · awaiting confirmation · won this month" h={Math.max(200, d.companies.length * 44 + 40)}>
+              <ResponsiveContainer>
+                <BarChart data={d.companies.map((c) => {
+                  const mine = rows.filter((r) => r.company_id === c.id);
+                  return { name: c.name, open: sum(mine.filter((r) => !['won', 'lost'].includes(r.stage))), awaiting: sum(mine.filter((r) => r.stage === 'awaiting')), won: sum(mine.filter((r) => r.stage === 'won' && r.closed_on?.startsWith(month))) };
+                })} layout="vertical" margin={{ top: 4, right: 20, left: 8, bottom: 0 }}>
+                  <XAxis type="number" hide />
+                  <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12.5, fill: '#252423' }} axisLine={false} tickLine={false} />
+                  <Tooltip formatter={(v) => fv(v, 'amount', unit)} contentStyle={{ fontFamily: 'Times New Roman' }} />
+                  <Bar dataKey="open" name="Open" fill="#118DFF" isAnimationActive={false} barSize={9} radius={2} />
+                  <Bar dataKey="awaiting" name="Awaiting" fill={STAGE_C.awaiting} isAnimationActive={false} barSize={9} radius={2} />
+                  <Bar dataKey="won" name="Won this month" fill={STAGE_C.won} isAnimationActive={false} barSize={9} radius={2} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          )}
           <ChartCard title="Pipeline by stage" sub="Value of opportunities in each stage" h={240}>
             <ResponsiveContainer>
               <BarChart data={funnel} layout="vertical" margin={{ top: 4, right: 60, left: 8, bottom: 0 }}>
@@ -101,10 +132,11 @@ export function Pipeline() {
         <div className="cc" style={{ marginTop: 8 }}>
           <div className="wrap">
             <table className="r pbi">
-              <thead><tr><th className="l">Customer</th><th className="l">Description</th><th>Value</th><th>Stage</th><th>Prob.</th><th>Opened</th><th>Expected close</th><th>Closed</th><th className="l">Owner</th><th /></tr></thead>
+              <thead><tr>{d.consolidated && <th className="l">Company</th>}<th className="l">Customer</th><th className="l">Description</th><th>Value</th><th>Stage</th><th>Prob.</th><th>Opened</th><th>Expected close</th><th>Closed</th><th className="l">Owner</th><th /></tr></thead>
               <tbody>
                 {shown.map((r) => (
                   <tr key={r.uid} className={d.editable ? 'click' : ''} onClick={() => d.editable && setForm(r)}>
+                    {d.consolidated && <td className="l mute">{r.company}</td>}
                     <td className="l">{r.customer}</td><td className="l mute">{r.title}</td>
                     <td className="n">{fv(r.value, 'amount', '1')}</td>
                     <td style={{ textAlign: 'center' }}><span className="stage" style={{ background: STAGE_C[r.stage] }}>{STAGE[r.stage]}</span></td>
@@ -146,37 +178,58 @@ function InitForm({ init, onClose, onSave }) {
 
 export function Initiatives() {
   const { notify } = useApp();
-  const [cid, setCid] = useCompany();
-  const [d, setD] = useState(null);
+  const [cid, setCid, isCompany] = useNode();
+  const [d, load] = useRegister('inits', cid, isCompany, notify);
   const [form, setForm] = useState(null);
-  const load = useCallback(() => cid && api.get(`/inits/${cid}`).then(setD).catch((e) => notify(e.message, 'err')), [cid, notify]);
-  useEffect(() => { load(); }, [load]);
-  if (!d) return <><div className="bar"><NodeSelect value={cid} companiesOnly onChange={setCid} /></div><Loading /></>;
+  if (!d) return <><div className="bar"><NodeSelect value={cid} onChange={setCid} /></div><Loading /></>;
   const by = (k) => d.rows.filter((r) => r.status === k).length;
   const save = async (f) => { try { await api.put(`/inits/${cid}/${f.uid || 'new'}`, f); setForm(null); load(); notify('Saved'); } catch (e) { notify(e.message, 'err'); } };
   const late = (r) => r.target_date && r.target_date < today() && !['done', 'dropped'].includes(r.status);
   return (
     <>
       <div className="bar">
-        <NodeSelect value={cid} companiesOnly onChange={setCid} />
+        <NodeSelect value={cid} onChange={setCid} />
         <span className="sp" />
         {d.editable && <button className="dark" onClick={() => setForm({})}>New initiative</button>}
+        <PrintButton />
       </div>
       <div className="dash">
-        <div className="title"><Logo node={d.company} /><h1>{d.company.name}</h1><span className="meta">Strategic initiatives</span></div>
+        <PrintHeader node={d.company} title={d.consolidated ? 'Consolidated strategic initiatives' : 'Strategic initiatives'} />
+        <div className="title"><Logo node={d.company} /><h1>{d.company.name}</h1><span className="meta">{d.consolidated ? 'Consolidated strategic initiatives' : 'Strategic initiatives'}</span></div>
         <div className="kgrid">
           <KpiCard title="In progress" actual={by('in_progress')} fmt="number" />
           <KpiCard title="Planned" actual={by('planned')} fmt="number" />
           <KpiCard title="Done" actual={by('done')} fmt="number" />
           <KpiCard title="Past target date" actual={d.rows.filter(late).length} fmt="number" />
         </div>
+        {d.consolidated && d.companies.length > 0 && (
+          <div className="cc" style={{ marginTop: 16 }}>
+            <div className="cc-h"><span className="cc-t">By company</span></div>
+            <table className="r pbi">
+              <thead><tr><th className="l">Company</th>{Object.values(STATUS).map((s) => <th key={s}>{s}</th>)}<th>Past target</th><th>Average progress</th></tr></thead>
+              <tbody>{d.companies.map((c) => {
+                const mine = d.rows.filter((r) => r.company_id === c.id);
+                const live = mine.filter((r) => r.status !== 'dropped');
+                return (
+                  <tr key={c.id} className="click" onClick={() => setCid(c.id)}>
+                    <td className="l">{c.name}</td>
+                    {Object.keys(STATUS).map((k) => <td key={k} className="n">{mine.filter((r) => r.status === k).length || ''}</td>)}
+                    <td className={`n ${mine.filter(late).length ? 'bad' : ''}`}>{mine.filter(late).length || ''}</td>
+                    <td><div className="prog"><i style={{ width: `${live.length ? live.reduce((a, r) => a + (r.progress || 0), 0) / live.length : 0}%`, background: '#118DFF' }} /><span>{live.length ? Math.round(live.reduce((a, r) => a + (r.progress || 0), 0) / live.length) : 0}%</span></div></td>
+                  </tr>
+                );
+              })}</tbody>
+            </table>
+          </div>
+        )}
         <div className="cc" style={{ marginTop: 16 }}>
           <div className="wrap">
             <table className="r pbi">
-              <thead><tr><th className="l">Initiative</th><th className="l">Owner</th><th>Status</th><th>Start</th><th>Target</th><th style={{ minWidth: 160 }}>Progress</th><th /></tr></thead>
+              <thead><tr>{d.consolidated && <th className="l">Company</th>}<th className="l">Initiative</th><th className="l">Owner</th><th>Status</th><th>Start</th><th>Target</th><th style={{ minWidth: 160 }}>Progress</th><th /></tr></thead>
               <tbody>
                 {d.rows.map((r) => (
                   <tr key={r.uid} className={d.editable ? 'click' : ''} onClick={() => d.editable && setForm(r)}>
+                    {d.consolidated && <td className="l mute">{r.company}</td>}
                     <td className="l">{r.title}{r.notes ? <div className="small mute">{r.notes}</div> : null}</td>
                     <td className="l">{r.owner}</td>
                     <td style={{ textAlign: 'center' }}><span className="stage" style={{ background: STATUS_C[r.status] }}>{STATUS[r.status]}</span></td>
