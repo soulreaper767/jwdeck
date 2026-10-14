@@ -50,7 +50,7 @@ export default function Analytics() {
   const { view, setView, periods } = useApp();
   const [basis, setBasis] = useState('mtd');
   const per = ['month', 'quarter', 'half', 'year'].includes(basis);
-  const pq = periodQuery(view, periods);
+  const pq = periodQuery(view, periods, per ? basis : undefined);
   const [metric, setMetric] = useState('REV_NET');
   const [scope, setScope] = useState('companies');
   const unit = view.unit;

@@ -150,20 +150,30 @@ export function PrintHeader({ node, title, period }) {
 }
 
 // month / quarter / year selection with comparative (stored in the shared view)
-export const periodQuery = (view, periods) => ({
-  mode: view.pmode && view.pmode !== 'week' ? view.pmode : 'month',
+// comparison is remembered per period type: months default to the previous month, quarters and halves to the same period last year
+export const periodQuery = (view, periods, forced) => {
+  const mode = forced || (view.pmode && view.pmode !== 'week' ? view.pmode : 'month');
+  return {
+  mode,
   month: view.pmonth || periods?.last_month,
   fy: view.pfy || periods?.current_fy,
   q: view.pq || periods?.current_q,
   h: view.ph || periods?.current_h,
-  cmp: view.pcmp || 'prev',
-});
+  cmp: view[`pcmp_${mode}`] || (mode === 'month' ? 'prev' : 'ly'),
+  };
+};
 
 export function PeriodPicker({ mode: forced }) {
   const { view, setView, periods } = useApp();
   if (!periods) return null;
-  const q = periodQuery(view, periods);
-  const mode = forced || q.mode;
+  const q = periodQuery(view, periods, forced);
+  const mode = q.mode;
+  const fyl = (periods.fys || []).find((f) => f.fy === Number(q.fy))?.label || '';
+  const cmpOpts = {
+    month: [['prev', 'vs previous month'], ['ly', 'vs same month last year']],
+    quarter: [['ly', `vs Q${q.q} last year`], ['prev', Number(q.q) === 1 ? 'vs Q4 last year' : `vs Q${q.q - 1} ${fyl}`]],
+    half: [['ly', `vs H${q.h} last year`], ['prev', Number(q.h) === 1 ? 'vs H2 last year' : `vs H1 ${fyl}`]],
+  }[mode];
   return (
     <>
       {mode === 'month' && <MonthSelect value={q.month} onChange={(m) => setView({ pmonth: m })} />}
@@ -172,9 +182,9 @@ export function PeriodPicker({ mode: forced }) {
           {(periods.fys || []).map((f) => <option key={f.fy} value={f.fy}>{f.label}</option>)}
         </select>
       )}
-      {mode === 'quarter' && <Seg value={Number(q.q)} options={[1, 2, 3, 4].map((n) => [n, `Q${n}`])} onChange={(n) => setView({ pq: n })} />}
-      {mode === 'half' && <Seg value={Number(q.h)} options={[1, 2].map((n) => [n, `H${n}`])} onChange={(n) => setView({ ph: n })} />}
-      {mode !== 'year' && <Seg value={q.cmp} options={[['prev', { month: 'vs prev. month', quarter: 'vs prev. quarter', half: 'vs prev. half' }[mode]], ['ly', 'vs last year']]} onChange={(c) => setView({ pcmp: c })} />}
+      {mode === 'quarter' && <Seg value={Number(q.q)} options={[1, 2, 3, 4].map((n) => [n, `Q${n}`])} onChange={(n) => setView({ pq: n, pcmp_quarter: null })} />}
+      {mode === 'half' && <Seg value={Number(q.h)} options={[1, 2].map((n) => [n, `H${n}`])} onChange={(n) => setView({ ph: n, pcmp_half: null })} />}
+      {cmpOpts && <Seg value={q.cmp} options={cmpOpts} onChange={(c) => setView({ [`pcmp_${mode}`]: c })} />}
     </>
   );
 }

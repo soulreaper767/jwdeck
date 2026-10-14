@@ -85,7 +85,7 @@ export default function Monthly() {
 function MonthReport() {
   const { view, setView, periods } = useApp();
   const month = view.pmonth || (view.month && /^\d{4}-\d{2}$/.test(view.month) ? view.month : periods?.last_month);
-  const cmpMode = view.pcmp || 'prev';
+  const cmpMode = view.pcmp_month || 'prev';
   const { data: cmpData } = useView('/view/period', { node: view.nodeId, mode: 'month', month, cmp: cmpMode }, [view.nodeId, month, cmpMode]);
   const cflat = cmpData ? Object.fromEntries(cmpData.sections.flatMap((s) => s.rows).filter((x) => x.code).map((x) => [x.code, x.c.a])) : {};
   const cchild = (id, code) => cmpData?.children?.find((x) => x.id === id)?.rows[code]?.c.a ?? null;
@@ -111,7 +111,7 @@ function MonthReport() {
         <NodeSelect value={view.nodeId} onChange={(id) => setView({ nodeId: id })} />
         <RModeSeg />
         <MonthSelect value={month} onChange={(m) => setView({ month: m, pmonth: m })} />
-        <Seg value={cmpMode} options={[['prev', 'vs prev. month'], ['ly', 'vs last year']]} onChange={(c) => setView({ pcmp: c })} />
+        <Seg value={cmpMode} options={[['prev', 'vs previous month'], ['ly', 'vs same month last year']]} onChange={(c) => setView({ pcmp_month: c })} />
         <UnitSelect />
         <label className="c"><input type="checkbox" checked={weeks} onChange={(e) => setWeeks(e.target.checked)} />Weeks</label>
         <label className="c"><input type="checkbox" checked={recon} onChange={(e) => setRecon(e.target.checked)} />Reconciliation</label>
