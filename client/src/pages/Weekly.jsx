@@ -87,9 +87,9 @@ function Row({ x, unit, ytd, recon, adj, flag = true }) {
 }
 
 export default function Weekly() {
-  const { view, setView } = useApp();
+  const { view, setView, user } = useApp();
   const [ytd, setYtd] = useState(true);
-  const [recon, setRecon] = useState(true);
+  const [recon, setRecon] = useState(['admin', 'company_dpo'].includes(user.role));
   const [full, setFull] = useState(false);
   const { data, err } = useView('/view/week', { node: view.nodeId, week: view.week, month: view.month || '' }, [view.nodeId, view.week, view.month]);
   const unit = view.unit;
@@ -133,6 +133,10 @@ export default function Weekly() {
             <span className="sp" />
             {data.node.type === 'company' ? <St s={data.coverage.status[0]?.status} reopened={data.coverage.status[0]?.reopened} /> : <StatusCounts by={data.coverage.by} />}
           </div>
+          <div className="rv-tiles">
+            <a className={`rv-t ${data.adjustments.length ? 'warn' : 'ok'}`} href="#adjustments"><span>Prior-week adjustments</span><b>{data.adjustments.length || 'None'}</b></a>
+            <div className={`rv-t ${allRows.some((x) => x.diff) ? 'warn' : 'ok'}`} onClick={() => setRecon(true)} style={{ cursor: 'pointer' }}><span>MTD changed vs last reported</span><b>{allRows.filter((x) => x.diff).length ? `${allRows.filter((x) => x.diff).length} lines` : 'None'}</b></div>
+          </div>
           {segs.length > 1 && <div className="small mute" style={{ marginBottom: 8 }}>{segs.map((s) => `${s.label} → ${s.month}${s.closes_month ? ' (month end)' : ''}`).join('   ·   ')}</div>}
 
           {data.children && <h2 className="part">{data.node.type === 'group' ? 'Group summary' : 'Cluster summary'}</h2>}
@@ -153,7 +157,7 @@ export default function Weekly() {
           </div>
 
           {data.adjustments.length > 0 && (
-            <div style={{ marginTop: 18 }}>
+            <div style={{ marginTop: 18 }} id="adjustments">
               <h3 style={{ fontWeight: 'bold', marginBottom: 4 }}>Prior-week adjustments</h3>
               <div className="wrap"><table className="r">
                 <thead><tr><th className="l">Company</th><th className="l">Line</th><th>Amount</th><th className="l">Reason</th></tr></thead>

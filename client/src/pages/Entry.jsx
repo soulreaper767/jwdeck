@@ -3,7 +3,8 @@ import { useNavigate, useParams, Link } from 'react-router-dom';
 import { useApp } from '../store.jsx';
 import { api } from '../lib/api.js';
 import { fv, vr, fpct, parseNum, plainNum } from '../lib/format.js';
-import { NodeSelect, WeekSelect, Seg, Loading, Ask, Logo, Workflow } from '../ui.jsx';
+import { NodeSelect, WeekSelect, Seg, Loading, Ask, Logo, Workflow, UnitSelect, Num } from '../ui.jsx';
+import { emptyWeekRow } from './Weekly.jsx';
 
 const MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const monthName = (m) => (m ? `${MN[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}` : '');
@@ -44,6 +45,95 @@ export function OpeningSetup({ cid, onDone }) {
       </div>
       <div style={{ marginTop: 12 }} className="small">SKUs: {info.skus.filter((s) => s.active).map((s) => s.name).join(', ') || 'none'} · <Link to={`/companies?c=${cid}`}>edit</Link></div>
     </div>
+  );
+}
+
+// Read-only filing for reviewers and executives: results first, adjustments flagged
+function FilingReview({ d, sections, segs, month, unit }) {
+  const adj = Object.entries(d.data.adj || {});
+  const notes = Object.entries(d.data.notes || {}).filter(([, n]) => n);
+  const rows = sections.flatMap((s) => s.rows);
+  const label = (code) => rows.find((r) => r.code === code)?.name || code;
+  const changed = rows.filter((x) => x.code && x.diff);
+  const hasAdj = adj.length > 0;
+  const split = segs.length > 1;
+  const cols = 1 + (split ? segs.length : 0) + 9 + (hasAdj ? 1 : 0);
+  const pc = (p, x) => vr(p?.a, p?.t, x.hib, x.fmt);
+  return (
+    <>
+      <div className="rv-tiles">
+        <div className={`rv-t ${hasAdj ? 'warn' : 'ok'}`}><span>Prior-week adjustments</span><b>{hasAdj ? adj.length : 'None'}</b></div>
+        <div className={`rv-t ${changed.length ? 'warn' : 'ok'}`}><span>MTD changed vs last reported</span><b>{changed.length ? `${changed.length} lines` : 'None'}</b></div>
+        <div className="rv-t"><span>Explanations</span><b>{notes.length || 'None'}</b></div>
+        <div className="rv-t"><span>Filed</span><b className="small">{d.revision ? `Revision ${d.revision}` : 'Not filed'}</b></div>
+      </div>
+      {hasAdj && (
+        <div className="cc" style={{ marginBottom: 14 }}>
+          <div className="cc-h"><span className="cc-t">Prior-week adjustments</span></div>
+          <table className="r pbi">
+            <thead><tr><th className="l">Line</th><th>Amount</th><th className="l">Reason</th></tr></thead>
+            <tbody>{adj.map(([item, a]) => <tr key={item}><td className="l">{label(item)}</td><Num v={a.value} fmt={/:(PQ|SQ)$/.test(item) ? 'qty' : 'amount'} unit={unit} /><td className="l">{a.reason}</td></tr>)}</tbody>
+          </table>
+        </div>
+      )}
+      {(notes.length > 0 || d.data.remarks) && (
+        <div className="cc" style={{ marginBottom: 14 }}>
+          {notes.map(([item, n]) => <div key={item} className="small"><b>{label(item)}:</b> {n}</div>)}
+          {d.data.remarks && <div className="small"><b>Remarks:</b> {d.data.remarks}</div>}
+        </div>
+      )}
+      <div className="wrap">
+        <table className="r">
+          <thead>
+            <tr className="g">
+              <th className="l first" />
+              {split && <th colSpan={segs.length} className="gap">Portions</th>}
+              <th colSpan={3} className="gap">Week</th>
+              <th colSpan={3} className="gap">MTD · {monthName(month)}</th>
+              <th colSpan={3} className="gap">YTD</th>
+              {hasAdj && <th className="gap">Adj.</th>}
+            </tr>
+            <tr>
+              <th className="l first" style={{ minWidth: 220 }} />
+              {split && segs.map((g, i) => <th key={g.month} className={i === 0 ? 'gap' : ''}>{g.label}</th>)}
+              {[0, 1, 2].map((i) => <Fragment key={i}><th className="gap">Actual</th><th>Target</th><th>%</th></Fragment>)}
+              {hasAdj && <th className="gap" />}
+            </tr>
+          </thead>
+          <tbody>
+            {sections.map((sec) => {
+              const list = sec.rows.filter((x) => x.group || !emptyWeekRow(x));
+              if (!list.some((x) => !x.group)) return null;
+              return (
+                <Fragment key={sec.code}>
+                  <tr className="sec"><td colSpan={cols} className="first">{sec.name}</td></tr>
+                  {list.map((x, i) => {
+                    if (x.group) return <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l first">{x.name}</td></tr>;
+                    const op = x.nature === 'opening';
+                    const f = x.fmt === 'flag' ? 'count' : x.fmt;
+                    const a = d.data.adj?.[x.code];
+                    return (
+                      <tr key={x.code} className={`${x.grand ? 'grand' : x.strong ? 'tot' : ''} ${a ? 'adjrow' : ''}`}>
+                        <td className="l first" style={{ paddingLeft: 8 + x.depth * 16 }}>{x.name}</td>
+                        {split && segs.map((g, j) => <Num key={g.month} className={j === 0 ? 'gap' : ''} v={d.data.values?.[x.code]?.[g.month] ?? null} fmt={x.fmt} unit={unit} />)}
+                        {[x.wk, x.mtd, x.ytd].map((p, k) => (
+                          <Fragment key={k}>
+                            <Num className="gap" v={p?.a ?? null} fmt={k ? f : x.fmt} unit={unit} />
+                            <Num className="lock" v={op ? null : p?.t ?? null} fmt={x.fmt} unit={unit} />
+                            <td className={`n ${pc(p, x).cls}`}>{op ? '' : fpct(pc(p, x).pct)}</td>
+                          </Fragment>
+                        ))}
+                        {hasAdj && (a ? <Num className="gap adjv" v={a.value} fmt={x.fmt} unit={unit} title={a.reason} /> : <td className="gap" />)}
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -157,6 +247,7 @@ export default function Entry() {
       <NodeSelect value={cid} companiesOnly onChange={(c) => go(c, week)} />
       <WeekSelect value={week} onChange={(w) => go(cid, w)} from={d?.setup?.start_week} />
       {segs.length > 1 && <Seg value={month} options={segs.map((x) => [x.month, `MTD ${x.label}`])} onChange={setMonth} />}
+      {d && !d.editable && <UnitSelect />}
     </div>
   );
 
@@ -166,7 +257,8 @@ export default function Entry() {
 
   const ed = d.editable;
   const block = d.not_ended ? 'Week not ended' : d.unfiled.length ? `Earlier weeks pending: ${d.unfiled.join(', ')}` : '';
-  const cols = 1 + segs.length + 9 + 2;
+  const split = segs.length > 1;
+  const cols = 1 + segs.length + (split ? 9 : 8) + 2;
 
   return (
     <>
@@ -188,14 +280,14 @@ export default function Entry() {
           {d.status === 'lapsed' && <div className="note err">{d.offline_after_cutoff ? 'Past the cut-off · saving offline · needs group reviewer to reopen before submitting' : 'Not reported by the cut-off · counted as no figures · saved figures are kept for reopening'}</div>}
           {d.status === 'reopened' && <div className="note warn">Reopened for entry. Group figures keep the last submitted version until this is submitted.</div>}
           {d.month_locked && d.status !== 'lapsed' && <div className="note">Month closed.</div>}
-          {!sections ? <Loading /> : (
+          {!sections ? <Loading /> : !ed && d.revision ? <FilingReview d={d} sections={sections} segs={segs} month={month} unit={view.unit} /> : (
             <div className="wrap entry">
               <table className="r">
                 <thead>
                   <tr className="g">
                     <th className="l first" />
                     <th colSpan={segs.length} className="gap">This week</th>
-                    <th colSpan={3} className="gap">Week</th>
+                    <th colSpan={split ? 3 : 2} className="gap">Week</th>
                     <th colSpan={3} className="gap">MTD · {monthName(month)}</th>
                     <th colSpan={3} className="gap">YTD</th>
                     <th className="gap">Last week</th>
@@ -204,7 +296,7 @@ export default function Entry() {
                   <tr>
                     <th className="l first" style={{ minWidth: 210 }} />
                     {segs.map((x, i) => <th key={x.month} className={i === 0 ? 'gap' : ''}>{x.label}</th>)}
-                    <th className="gap">Total</th><th>Target</th><th>%</th>
+                    {split && <th className="gap">Total</th>}<th className={split ? '' : 'gap'}>Target</th><th>%</th>
                     <th className="gap">Actual</th><th>Target</th><th>%</th>
                     <th className="gap">Actual</th><th>Target</th><th>%</th>
                     <th className="gap" /><th />
@@ -241,11 +333,11 @@ export default function Entry() {
                                       onChange={(e) => change((st) => { (st.values[x.code] ||= {})[g.month] = e.target.value; return st; })}
                                       onBlur={(e) => { const n = parseNum(e.target.value); if (n != null && !Number.isNaN(n)) change((st) => { st.values[x.code][g.month] = plainNum(n); return st; }); }}
                                       onKeyDown={(e) => onKey(e, x.code, g.month)} onPaste={(e) => onPaste(e, x.code, g.month)} inputMode="decimal" />
-                                  ) : inp ? fv(parseNum(s.values[x.code]?.[g.month]), fmt, '1') : ''}
+                                  ) : inp ? fv(parseNum(s.values[x.code]?.[g.month]), fmt, '1') : !split ? <span className="calc">{fv(x.wk.a, fmt, '1')}</span> : ''}
                                 </td>
                               ))}
-                              <td className="n gap">{fv(x.wk.a, fmt, '1')}</td>
-                              <td className="n lock">{op ? '' : fv(x.wk.t, fmt, '1')}</td>
+                              {split && <td className="n gap">{fv(x.wk.a, fmt, '1')}</td>}
+                              <td className={`n lock ${split ? '' : 'gap'}`}>{op ? '' : fv(x.wk.t, fmt, '1')}</td>
                               <td className={`n ${pc(x.wk).cls}`}>{op ? '' : fpct(pc(x.wk).pct)}</td>
                               <td className="n gap">{fv(x.mtd.a, fmt === 'flag' ? 'count' : fmt, '1')}</td>
                               <td className="n lock">{op ? '' : fv(x.mtd.t, fmt, '1')}</td>
@@ -285,7 +377,7 @@ export default function Entry() {
               </table>
             </div>
           )}
-          <div className="row" style={{ marginTop: 16, alignItems: 'flex-end' }}>
+          {(ed || !d.revision) && <div className="row" style={{ marginTop: 16, alignItems: 'flex-end' }}>
             <label className="f" style={{ flex: 1, minWidth: 260 }}>Remarks
               <textarea rows={2} disabled={!ed} value={s.remarks} onChange={(e) => { setS({ ...s, remarks: e.target.value }); setDirty(true); }} />
             </label>
@@ -293,7 +385,7 @@ export default function Entry() {
               <button onClick={save} disabled={busy}>Save draft{dirty ? ' •' : ''}</button>
               <button className="dark" onClick={() => setAsk(true)} disabled={busy || !!block} title={block}>Submit</button>
             </>}
-          </div>
+          </div>}
           {ed && block && <div className="small mute" style={{ marginTop: 6, textAlign: 'right' }}>{block}</div>}
         </>
       )}

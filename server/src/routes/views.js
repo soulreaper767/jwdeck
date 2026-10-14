@@ -112,6 +112,7 @@ r.get('/inbox', h((req) => {
     for (const rep of plainAll(db.prepare(`SELECT * FROM ${table} WHERE status IN ('submitted','company_ok','cluster_ok','reopened','draft') ORDER BY ${key}`).all())) {
       if (!canView(u, rep.company_id, eng.tree)) continue;
       const item = { kind, company_id: rep.company_id, company: name(rep.company_id), period: rep[key], status: rep.status, updated_at: rep.updated_at };
+      if (kind === 'week') { const f = eng.filings.get(`${rep.company_id}|${rep[key]}`); if (f) { item.adj = Object.keys(f.adj || {}).length; item.revision = f.revision; } }
       if (actions(u, rep.company_id, rep.status, eng.tree).includes('approve')) review.push(item);
       else if (['reopened', 'draft'].includes(rep.status) && canPrepare(u, rep.company_id, eng.tree)) {
         const st = kind === 'week' ? eng.weekStatus(rep.company_id, rep.week_key) : rep.status;

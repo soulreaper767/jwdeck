@@ -26,8 +26,13 @@ export default function App() {
   useEffect(() => { setOpen(false); document.querySelectorAll('details.navmore[open]').forEach((d) => d.removeAttribute('open')); }, [loc.pathname]);
   if (booting) return <Loading />;
   if (!user) return <Login />;
-  const prep = user.role === 'admin' || user.role === 'company_dpo';
+  const role = user.role;
+  const prep = role === 'admin' || role === 'company_dpo';
+  const reviewer = ['company_reviewer', 'cluster_reviewer', 'group_reviewer'].includes(role);
+  const exec = role === 'executive';
   const pending = (inbox?.review.length || 0) + (inbox?.todo.length || 0);
+  const badge = pending ? <span className="badge-n">{pending}</span> : null;
+  const inboxTab = !exec && <NavLink to="/review">{reviewer ? 'Approvals' : role === 'company_dpo' ? 'Tasks' : 'Review'}{badge}</NavLink>;
 
   return (
     <>
@@ -36,18 +41,20 @@ export default function App() {
           <div className="brand"><b>JW</b> Dash</div>
           <button className="burger" onClick={() => setOpen(!open)}>{open ? 'Close' : 'Menu'}{pending ? <span className="badge-n">{pending}</span> : null}</button>
           <nav className={open ? 'open' : ''}>
+            {reviewer && inboxTab}
             <NavLink to="/" end>Overview</NavLink>
-            <NavLink to="/weekly">Weekly</NavLink>
-            <NavLink to="/monthly">Monthly</NavLink>
-            <NavLink to="/analytics">Analytics</NavLink>
             {prep && <NavLink to="/enter">Weekly entry</NavLink>}
             {prep && <NavLink to="/close">Month close</NavLink>}
-            <NavLink to="/review">Review{pending ? <span className="badge-n">{pending}</span> : null}</NavLink>
-            <NavLink to="/status">Status</NavLink>
+            {role === 'company_dpo' && inboxTab}
+            <NavLink to="/weekly">Weekly</NavLink>
+            <NavLink to="/monthly">Monthly</NavLink>
+            {role !== 'company_dpo' && <NavLink to="/analytics">Analytics</NavLink>}
+            {role === 'admin' && inboxTab}
+            {!exec && <NavLink to="/status">Status</NavLink>}
             <NavLink to="/pipeline">Pipeline</NavLink>
             <NavLink to="/initiatives">Initiatives</NavLink>
             <NavLink to="/budgets">Budgets</NavLink>
-            <NavLink to="/companies">Companies</NavLink>
+            <NavLink to="/companies">{role === 'company_dpo' || role === 'company_reviewer' ? 'Company' : 'Companies'}</NavLink>
             {isAdmin && (
               <details className={`navmore ${['/lines', '/users', '/settings', '/log'].includes(loc.pathname) ? 'on' : ''}`}>
                 <summary>Setup</summary>
@@ -77,7 +84,7 @@ export default function App() {
           <Route path="/close" element={<Close />} />
           <Route path="/close/:cid" element={<Close />} />
           <Route path="/close/:cid/:month" element={<Close />} />
-          <Route path="/review" element={<Review />} />
+          <Route path="/review" element={user.role === 'executive' ? <Navigate to="/" /> : <Review />} />
           <Route path="/status" element={<Status />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/pipeline" element={<Pipeline />} />

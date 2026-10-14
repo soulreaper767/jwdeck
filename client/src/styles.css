@@ -310,3 +310,15 @@ header.top .navmore-p a.active { border: 0; background: var(--sec); }
   details.navmore summary { padding: 8px 0; border-bottom: 1px solid var(--line-2); }
   .navmore-p { position: static; box-shadow: none; border: 0; padding: 0 0 0 14px; }
 }
+
+/* review tiles */
+.rv-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin: 10px 0 14px; }
+.rv-t { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); text-decoration: none; color: var(--ink); }
+.rv-t span { font-size: 11.5px; text-transform: uppercase; letter-spacing: .5px; color: var(--mute); font-weight: bold; }
+.rv-t b { font-size: 19px; }
+.rv-t.ok { border-left-color: #1A7F37; } .rv-t.ok b { color: #1A7F37; }
+.rv-t.warn { border-left-color: #D9730D; } .rv-t.warn b { color: #B24D1D; }
+.chip.warn { background: #FDEEE6; color: #B24D1D; }
+tr.adjrow td.first { box-shadow: inset 3px 0 0 #D9730D; }
+td.adjv { color: #B24D1D; font-weight: bold; cursor: help; }
+.calc { color: var(--mute); }

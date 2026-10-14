@@ -15,7 +15,8 @@ let seed = 7;
 const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
 const jitter = (p) => 1 + (rnd() - 0.5) * 2 * p;
 const ids = {};
-const COS = [['PHL', 'Pakistan Holstein'], ['RJF', 'Royal JW Foods'], ['RJB', 'Royal JW Buffalo'], ['JWA', 'JW Al-Arabia'], ['EPS', 'EPS Packages'], ['JWP', 'JW Packages']];
+const COS = [['PHL', 'Pakistan Holstein', 'Dairy farming · Holstein herd, raw milk'], ['RJF', 'Royal JW Foods', 'Dairy products · UHT milk, yogurt, butter'], ['RJB', 'Royal JW Buffalo', 'Buffalo dairy · milk, mozzarella'],
+  ['JWA', 'JW Al-Arabia', 'Beverages · carbonated soft drinks'], ['EPS', 'EPS Packages', 'Packaging · expanded polystyrene boxes & sheets'], ['JWP', 'JW Packages', 'Packaging · corrugated cartons, flexible packaging']];
 const users = {};
 
 tx(() => {
@@ -27,8 +28,8 @@ tx(() => {
   const G = add(null, 'group', 'JW', 'JW Group', 0, { short_name: 'JW' });
   const CG = add(G, 'cluster', 'CGC', 'Consumer Global Cluster', 1, { short_name: 'Consumer Global' });
   const SC = add(G, 'cluster', 'SCC', 'Supply Chain Cluster', 2, { short_name: 'Supply Chain' });
-  COS.slice(0, 4).forEach(([c, n], i) => add(CG, 'company', c, n, i + 1));
-  COS.slice(4).forEach(([c, n], i) => add(SC, 'company', c, n, i + 1));
+  COS.slice(0, 4).forEach(([c, n, b], i) => add(CG, 'company', c, n, i + 1, { business_nature: b }));
+  COS.slice(4).forEach(([c, n, b], i) => add(SC, 'company', c, n, i + 1, { business_nature: b }));
 
   // ---------------------------------------------------------------- reporting lines
   const sec = db.prepare('INSERT INTO sections(code, name, scope, sort) VALUES (?,?,?,?)');
@@ -134,7 +135,8 @@ const PROFILES = {
   PHL: { skus: [['Raw milk', 'litres', 45000, 0.96, 210], ['Heifers', 'head', 0.4, 0.8, 450000]], other: 150e3, ret: 0.01, opex: 0.84, gm: 0.34, cash: 120e6 },
   RJF: { skus: [['UHT milk 1L', 'packs', 60000, 0.97, 290], ['Yogurt 500g', 'cups', 20000, 0.95, 180], ['Butter 200g', 'packs', 3000, 0.93, 520]], other: 80e3, ret: 0.025, opex: 0.86, gm: 0.27, cash: 180e6 },
   RJB: { skus: [['Buffalo milk', 'litres', 25000, 0.97, 230], ['Mozzarella', 'kg', 600, 0.9, 2400]], other: 40e3, ret: 0.015, opex: 0.85, gm: 0.3, cash: 70e6 },
-  JWA: { skus: [['Fresh milk 1L', 'packs', 18000, 0.96, 320], ['Laban 1L', 'packs', 9000, 0.95, 280]], other: 30e3, ret: 0.02, opex: 0.87, gm: 0.26, cash: 60e6 },
+  // 3 flavours x 3 packs
+  JWA: { skus: [['Cola', 1], ['Clear', 0.6], ['Zing', 0.4]].flatMap(([f, k]) => [[`${f} 300ml PET`, 'bottles', 30000 * k, 0.95, 60], [`${f} 1500ml PET`, 'bottles', 9000 * k, 0.94, 170], [`${f} 250ml can`, 'cans', 6000 * k, 0.93, 90]]), other: 30e3, ret: 0.02, opex: 0.87, gm: 0.26, cash: 60e6 },
   EPS: { skus: [['EPS boxes', 'pcs', 40000, 0.98, 55], ['EPS sheets', 'kg', 3000, 0.96, 650]], other: 60e3, ret: 0.01, opex: 0.88, gm: 0.22, cash: 45e6 },
   JWP: { skus: [['Corrugated cartons', 'pcs', 70000, 0.97, 85], ['Flexible packaging', 'kg', 5000, 0.95, 900]], other: 90e3, ret: 0.012, opex: 0.87, gm: 0.24, cash: 90e6 },
 };
@@ -182,8 +184,23 @@ tx(() => {
 });
 
 // ---- sample pipeline and initiatives; weekly business-development figures are derived from these
-const CUSTOMERS = ['Metro Distributors', 'Al-Noor Traders', 'City Mart', 'Green Valley Foods', 'Prime Retail', 'Sapphire Hotels', 'National Exports', 'Royal Bakers', 'Star Packaging Users', 'Crescent Dairy Co-op', 'Galaxy Supermarkets', 'Pak-Gulf Trading'];
-const INITS = ['Distribution tie-up in Southern Punjab', 'Export market study (GCC)', 'Solar power for plant', 'Cold-chain expansion', 'Key-account program', 'ERP roll-out', 'New product line trial'];
+const DAIRY_CUST = ['Metro Distributors', 'Al-Noor Traders', 'City Mart', 'Prime Retail', 'Sapphire Hotels', 'Royal Bakers', 'Galaxy Supermarkets', 'Crescent Dairy Co-op', 'Pak-Gulf Trading'];
+const CUSTOMERS = {
+  PHL: ['Nestlé collection centre', 'Crescent Dairy Co-op', 'Royal JW Foods', 'Al-Noor Traders', 'Green Valley Farms', 'Lahore Milk Supply'],
+  RJF: DAIRY_CUST, RJB: [...DAIRY_CUST.slice(0, 6), 'Pizza Point chain', 'Cheezious outlets', 'Hotel One'],
+  JWA: ['Metro Distributors', 'Al-Noor Traders', 'City Mart', 'Imtiaz Stores', 'Prime Retail', 'Galaxy Supermarkets', 'KPK Beverages Distribution', 'Sindh Cold Drinks Agency', 'Pak-Gulf Trading'],
+  EPS: ['Fish exporters (Karachi)', 'Dawlance', 'Haier Pakistan', 'PEL Appliances', 'Pharma cold-chain users', 'Construction contractors'],
+  JWP: ['Royal JW Foods', 'JW Al-Arabia', 'National Foods', 'Shan Foods', 'Engro Foods', 'Textile exporters', 'Pharma packers'],
+};
+// each company's own initiatives (title, owner), oldest first
+const INITS = {
+  PHL: [['Herd expansion · 200 imported heifers', 'Farm manager'], ['Milk yield improvement program', 'Vet head'], ['Biogas plant from farm waste', 'Projects'], ['Silage storage expansion', 'Farm manager']],
+  RJF: [['Flavoured milk launch', 'Marketing'], ['Modern-trade listing drive', 'Sales head'], ['Cheese slices line', 'Plant head'], ['Cold-chain fleet expansion', 'Supply chain']],
+  RJB: [['Buffalo genetics program', 'Farm manager'], ['Mozzarella capacity upgrade', 'Plant head'], ['Pizza-chain supply contracts', 'Sales head'], ['Desi ghee launch', 'Marketing']],
+  JWA: [['New flavours · Orange & Lemon-lime', 'Marketing'], ['Energy drink launch', 'Marketing'], ['Can line capacity upgrade', 'Plant head'], ['Distribution expansion · KPK', 'Sales head']],
+  EPS: [['Moulding machine upgrade', 'Plant head'], ['Fish-box range for exporters', 'Sales head'], ['EPS waste recycling', 'Projects'], ['Construction panels (ICF)', 'Business development']],
+  JWP: [['5-ply corrugator installation', 'Projects'], ['Printed flexible pouches', 'Sales head'], ['FMCG key-account onboarding', 'Sales head'], ['Solar power for plant', 'Projects']],
+};
 tx(() => {
   const oi = db.prepare(`INSERT INTO opportunities(uid, company_id, customer, title, value, stage, probability, created_on, expected_close, closed_on, owner, notes, updated_at)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
@@ -201,15 +218,17 @@ tx(() => {
         const closeAt = new Date(opened.getTime() + (7 + Math.floor(rnd() * 28)) * DAY);
         const closed = closeAt <= P.weekEnd(LAST);
         const stage = closed ? (roll < 0.55 ? 'won' : 'lost') : roll < 0.25 ? 'awaiting' : roll < 0.5 ? 'negotiation' : roll < 0.75 ? 'proposal' : 'lead';
-        oi.run(crypto.randomUUID(), cid, CUSTOMERS[Math.floor(rnd() * CUSTOMERS.length)], null, value, stage, { lead: 10, proposal: 30, negotiation: 50, awaiting: 80, won: 100, lost: 0 }[stage],
+        oi.run(crypto.randomUUID(), cid, CUSTOMERS[code][Math.floor(rnd() * CUSTOMERS[code].length)], null, value, stage, { lead: 10, proposal: 30, negotiation: 50, awaiting: 80, won: 100, lost: 0 }[stage],
           P.ymd(opened), P.ymd(closeAt), closed ? P.ymd(closeAt) : null, null, null, new Date().toISOString());
       }
-      if (wi % 6 === 2) {
-        const start = new Date(P.weekStart(w).getTime() + 2 * DAY);
-        const st = wi < weeks.length - 6 ? (rnd() < 0.5 ? 'done' : 'in_progress') : 'planned';
-        ii.run(crypto.randomUUID(), cid, INITS[(wi + code.length) % INITS.length], null, P.ymd(start), P.ymd(new Date(start.getTime() + 90 * DAY)), st,
-          st === 'done' ? 100 : st === 'in_progress' ? 40 + Math.floor(rnd() * 40) : 0, null, new Date().toISOString());
-      }
+    });
+    // initiatives: one record each, spread over the weeks
+    INITS[code].forEach(([title, owner], i) => {
+      const w = weeks[Math.min(1 + i * 4, weeks.length - 1)];
+      const start = new Date(P.weekStart(w).getTime() + 2 * DAY);
+      const st = i === 0 ? 'done' : i === INITS[code].length - 1 ? 'planned' : 'in_progress';
+      ii.run(crypto.randomUUID(), cid, title, owner, P.ymd(start), P.ymd(new Date(start.getTime() + (60 + i * 30) * DAY)), st,
+        st === 'done' ? 100 : st === 'in_progress' ? 30 + Math.floor(rnd() * 50) : 0, null, new Date().toISOString());
     });
   }
 });

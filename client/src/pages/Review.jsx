@@ -14,7 +14,7 @@ function List({ title, items }) {
       {items.length === 0 ? <div className="empty">Nothing pending.</div> : (
         <div className="wrap">
           <table className="r">
-            <thead><tr><th className="l">Company</th><th className="l">Report</th><th className="l">Period</th><th className="l">Status</th><th /></tr></thead>
+            <thead><tr><th className="l">Company</th><th className="l">Report</th><th className="l">Period</th><th className="l">Status</th><th>Adjustments</th><th /></tr></thead>
             <tbody>
               {items.map((x, i) => (
                 <tr key={i}>
@@ -22,6 +22,7 @@ function List({ title, items }) {
                   <td className="l">{x.kind === 'month' ? 'Month close' : x.kind === 'week' ? 'Weekly' : 'Opening position'}</td>
                   <td className="l">{period(x)}</td>
                   <td className="l"><St s={x.status} /></td>
+                  <td style={{ textAlign: 'center' }}>{x.kind !== 'week' || x.adj == null ? '' : x.adj ? <span className="chip warn">{x.adj} adj.</span> : <span className="chip good">None</span>}</td>
                   <td className="n"><Link to={link(x)}>open ›</Link></td>
                 </tr>
               ))}
@@ -41,9 +42,9 @@ export default function Review() {
   const prep = ['admin', 'company_dpo'].includes(user.role);
   return (
     <>
-      <div className="bar"><h2>Review</h2></div>
+      <div className="bar"><h2>{user.role === 'company_dpo' ? 'Tasks' : reviewer && !prep ? 'Approvals' : 'Review'}</h2></div>
       {reviewer && <List title="Awaiting my approval" items={inbox.review} />}
-      {prep && <List title="To prepare" items={inbox.todo} />}
+      {prep && <List title={user.role === 'company_dpo' ? 'To prepare' : 'To prepare (as administrator)'} items={inbox.todo} />}
       {!reviewer && !prep && <div className="empty">Nothing assigned.</div>}
     </>
   );

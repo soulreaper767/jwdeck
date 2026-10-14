@@ -116,9 +116,11 @@ export default function Close() {
             </div>
           )}
           <div className="row" style={{ marginTop: 16, alignItems: 'flex-end' }}>
-            <label className="f" style={{ flex: 1, minWidth: 260 }}>Commentary
-              <textarea rows={3} disabled={!ed} value={remarks} onChange={(e) => { setRemarks(e.target.value); setDirty(true); }} />
-            </label>
+            {ed ? (
+              <label className="f" style={{ flex: 1, minWidth: 260 }}>Commentary
+                <textarea rows={3} value={remarks} onChange={(e) => { setRemarks(e.target.value); setDirty(true); }} />
+              </label>
+            ) : remarks ? <div className="cc small" style={{ flex: 1 }}><b>Commentary:</b> {remarks}</div> : null}
             {ed && <>
               <button onClick={save} disabled={busy}>Save draft{dirty ? ' •' : ''}</button>
               <button className="dark" onClick={() => setAsk(true)} disabled={busy || !d.ready}>Submit</button>

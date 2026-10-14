@@ -53,8 +53,8 @@ export function UnitSelect() {
   return <Seg value={view.unit === '1' ? '1' : 'm'} options={[['m', 'Millions'], ['1', 'Full']]} onChange={(u) => setView({ unit: u })} />;
 }
 
-export const Num = ({ v, fmt, unit, className = '' }) => (
-  <td className={`n ${className}`} title={v == null || fmt === 'percent' ? undefined : fv(v, fmt === 'qty' ? 'qty' : fmt, '1')}>{fv(v, fmt, unit)}</td>
+export const Num = ({ v, fmt, unit, className = '', title }) => (
+  <td className={`n ${className}`} title={title || v == null || fmt === 'percent' ? undefined : fv(v, fmt === 'qty' ? 'qty' : fmt, '1')}>{fv(v, fmt, unit)}</td>
 );
 
 export const St = ({ s, reopened, overdue }) => (
