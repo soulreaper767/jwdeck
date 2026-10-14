@@ -133,7 +133,7 @@ export default function Overview() {
           <h2 className="part">This week</h2>
           <div className="kgrid">
             <KpiCard title="Net revenue · week" actual={w.REV_NET?.wk.a} budget={w.REV_NET?.wk.t} unit={unit} spark={trend} sparkKey="REV_NET" />
-            <KpiCard title="Net revenue · MTD" actual={w.REV_NET?.mtd.a} budget={w.REV_NET?.mtd.t} unit={unit} foot={`YTD ${fv(w.REV_NET?.ytd.a, 'amount', unit)} of ${fv(w.REV_NET?.ytd.t, 'amount', unit)}`} />
+            <KpiCard title="Net revenue · MTD" actual={w.REV_NET?.mtd.a} budget={w.REV_NET?.mtd.t} unit={unit} foot={w.REV_NET?.ytd.a != null ? `YTD ${fv(w.REV_NET.ytd.a, 'amount', unit)}${w.REV_NET.ytd.t != null ? ` of ${fv(w.REV_NET.ytd.t, 'amount', unit)}` : ''}` : null} />
             <KpiCard title="Recoveries · MTD" actual={w.REC_TOT?.mtd.a} budget={w.REC_TOT?.mtd.t} unit={unit} spark={trend} sparkKey="REC_TOT" />
             <KpiCard title="Payments · MTD" actual={w.PAY_TOT?.mtd.a} budget={w.PAY_TOT?.mtd.t} unit={unit} hib={0} spark={trend} sparkKey="PAY_TOT" />
             <KpiCard title="Closing cash & bank" actual={w.CB_CLOSE?.wk.a} budget={w.CB_CLOSE?.wk.t} unit={unit} spark={trend} sparkKey="CB_CLOSE" />
@@ -142,11 +142,11 @@ export default function Overview() {
 
           <h2 className="part">Business development</h2>
           <div className="kgrid">
-            <KpiCard title="New leads · MTD" actual={w.BD_LEADS?.mtd.a} budget={w.BD_LEADS?.mtd.t} fmt="number" unit={unit} foot={`Value ${fv(w.BD_LEADS_V?.mtd.a, 'amount', unit)}`} />
+            <KpiCard title="New leads · MTD" actual={w.BD_LEADS?.mtd.a} budget={w.BD_LEADS?.mtd.t} fmt="number" unit={unit} foot={w.BD_LEADS_V?.mtd.a != null ? `Value ${fv(w.BD_LEADS_V.mtd.a, 'amount', unit)}` : null} />
             <KpiCard title="Pipeline (open)" actual={w.BD_PIPE?.wk.a} unit={unit} spark={trend} sparkKey="BD_PIPE" />
             <KpiCard title="Orders confirmed · MTD" actual={w.BD_CONF?.mtd.a} budget={w.BD_CONF?.mtd.t} unit={unit} spark={trend} sparkKey="BD_CONF" />
             <KpiCard title="Orders to be confirmed" actual={w.BD_TBD?.wk.a} unit={unit} />
-            <KpiCard title={isCo ? 'New strategic initiative' : 'Units with new initiatives'} actual={w.BD_INIT?.wk.a} fmt={isCo ? 'flag' : 'count'} unit={unit} foot={`${fv(w.BD_INIT?.ytd.a, 'count')} this year`} />
+            <KpiCard title={isCo ? 'New strategic initiative' : 'Units with new initiatives'} actual={w.BD_INIT?.wk.a} fmt={isCo ? 'flag' : 'count'} unit={unit} foot={w.BD_INIT?.ytd.a != null ? `${fv(w.BD_INIT.ytd.a, 'count')} this year` : null} />
           </div>
 
           {mon && (
@@ -281,17 +281,18 @@ export default function Overview() {
                 {data.children.map((c) => {
                   const r = c.rows;
                   const v = vr(r.REV_NET?.mtd.a, r.REV_NET?.mtd.t, 1);
+                  const f = (x) => fv(x, 'amount', unit) || '–';
                   const mc = mon?.children?.find((x) => x.id === c.id)?.rows || {};
                   return (
                     <div key={c.id} className="uc" onClick={() => setView({ nodeId: c.id })}>
                       <div className="uc-h"><Logo node={c} size="sm" /><b>{c.name}</b><span className="sp" />{c.type === 'company' ? <St s={c.status} reopened={c.reopened} /> : <StatusCounts by={c.coverage.by} />}</div>
-                      <div className="uc-v">{fv(r.REV_NET?.mtd.a, 'amount', unit)} <span className="mute small">net revenue MTD</span></div>
-                      <div className="kc-row"><span className="tag-b">Budget</span><span>{fv(r.REV_NET?.mtd.t, 'amount', unit)}</span><span className="sp" />{v.pct != null && <span className={`chip ${v.cls}`}>{fpct(v.pct)}</span>}</div>
+                      <div className="uc-v">{f(r.REV_NET?.mtd.a)} <span className="mute small">net revenue MTD</span></div>
+                      <div className="kc-row"><span className="tag-b">Budget</span><span>{f(r.REV_NET?.mtd.t)}</span><span className="sp" />{v.pct != null && <span className={`chip ${v.cls}`}>{fpct(v.pct)}</span>}</div>
                       <div className="uc-m">
-                        <span>Recoveries <b>{fv(r.REC_TOT?.mtd.a, 'amount', unit)}</b></span>
-                        <span>Cash <b>{fv(r.CB_CLOSE?.wk.a, 'amount', unit)}</b></span>
-                        <span>Orders <b>{fv(r.BD_CONF?.mtd.a, 'amount', unit)}</b></span>
-                        <span>EBITDA {mon?.month_label.slice(0, 3)} <b>{fv(mc.PL_EBITDA?.m.a, 'amount', unit) || '–'}</b></span>
+                        <span>Recoveries <b>{f(r.REC_TOT?.mtd.a)}</b></span>
+                        <span>Cash <b>{f(r.CB_CLOSE?.wk.a)}</b></span>
+                        <span>Orders <b>{f(r.BD_CONF?.mtd.a)}</b></span>
+                        <span>EBITDA {mon?.month_label.slice(0, 3)} <b>{f(mc.PL_EBITDA?.m.a)}</b></span>
                       </div>
                     </div>
                   );

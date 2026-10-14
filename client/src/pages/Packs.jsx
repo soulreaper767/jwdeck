@@ -19,7 +19,7 @@ export default function Packs() {
     <>
       <div className="bar"><h2>Reporting lines</h2></div>
       <div className="wrap">
-        <table className="r" style={{ maxWidth: 1000 }}>
+        <table className="r">
           <thead><tr><th className="l">Line</th><th className="l">Type</th><th className="l">Cash flow</th><th className="l">Formula</th><th className="l">Budget</th><th className="l">On</th></tr></thead>
           <tbody>
             {d.sections.map((s) => (

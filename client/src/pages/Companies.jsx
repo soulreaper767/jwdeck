@@ -79,11 +79,13 @@ function NodeForm({ init, onClose, onSaved }) {
 function Profile({ node }) {
   const meta = node.meta || {};
   const shown = FIELDS.filter(([k]) => meta[k]);
-  if (!shown.length) return <div className="mute small">No profile details yet.</div>;
+  if (!shown.length) return <div className="box mute">No profile details yet.</div>;
   return (
-    <table className="r" style={{ maxWidth: 760 }}>
-      <tbody>{shown.map(([k, label]) => <tr key={k}><td className="l mute" style={{ width: 220 }}>{label}</td><td className="l" style={{ whiteSpace: 'pre-wrap' }}>{meta[k]}</td></tr>)}</tbody>
-    </table>
+    <div className="wrap">
+      <table className="r">
+        <tbody>{shown.map(([k, label]) => <tr key={k}><td className="l mute" style={{ width: 240 }}><b>{label}</b></td><td className="l" style={{ whiteSpace: 'pre-wrap' }}>{meta[k]}</td></tr>)}</tbody>
+      </table>
+    </div>
   );
 }
 
@@ -97,7 +99,7 @@ function CompanySetup({ cid }) {
   useEffect(() => { load(); }, [cid]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!d) return null;
   const saveOpening = async () => { try { await api.put(`/companies/${cid}/setup`, { start_week: week, opening_cash: parseNum(cash) }); notify('Saved'); load(); } catch (e) { notify(e.message, 'err'); } };
-  const saveSkus = async () => { try { await api.put(`/companies/${cid}/skus`, { skus }); notify('Saved'); load(); } catch (e) { notify(e.message, 'err'); } };
+  const saveSkus = async () => { if (skus.length < d.skus.filter((s) => s.active).length && !window.confirm('Some SKUs will be retired. Their history is kept. Continue?')) return; try { await api.put(`/companies/${cid}/skus`, { skus }); notify('Saved'); load(); } catch (e) { notify(e.message, 'err'); } };
   const up = (i, p) => setSkus(skus.map((s, j) => (j === i ? { ...s, ...p } : s)));
   return (
     <>
@@ -110,7 +112,7 @@ function CompanySetup({ cid }) {
         </div>
       )}
       <h2 className="part">SKUs / items</h2>
-      <div className="wrap"><table className="r" style={{ maxWidth: 640 }}>
+      <div className="wrap"><table className="r">
         <thead><tr><th className="l">Name</th><th className="l">Unit</th><th className="l">Active</th><th /></tr></thead>
         <tbody>{skus.map((s, i) => (
           <tr key={s.id || `n${i}`}>
@@ -147,7 +149,7 @@ export default function Companies() {
             <Logo node={node} size="lg" />
             <div>
               <h1>{node.name}</h1>
-              <div className="meta">{node.meta?.entity_type || node.type}{node.meta?.business_nature ? ` · ${node.meta.business_nature}` : ''}{node.active ? '' : ' · inactive'}</div>
+              <div className="meta">{node.meta?.entity_type || { group: 'Group', cluster: 'Cluster', company: 'Company' }[node.type]}{node.meta?.business_nature ? ` · ${node.meta.business_nature}` : ''}{node.active ? '' : ' · inactive'}</div>
             </div>
             <span className="sp" />
             {isAdmin && <button onClick={() => setForm({ ...node })}>Edit profile</button>}
@@ -165,11 +167,11 @@ export default function Companies() {
           {node.children.length > 0 && (
             <>
               <h2 className="part">{node.type === 'group' ? 'Clusters' : 'Companies'}</h2>
-              <div className="wrap"><table className="r" style={{ maxWidth: 760 }}>
+              <div className="wrap"><table className="r">
                 <tbody>{node.children.map((c) => (
                   <tr key={c.id} className="click" onClick={() => setSel(c.id)}>
                     <td className="l" style={{ width: 40 }}><Logo node={c} size="sm" /></td>
-                    <td className="l">{c.name}</td><td className="l mute">{c.meta?.business_nature || c.type}</td>
+                    <td className="l">{c.name}</td><td className="l mute">{c.meta?.business_nature || (c.type === 'cluster' ? 'Cluster' : 'Company')}</td>
                   </tr>
                 ))}</tbody>
               </table></div>

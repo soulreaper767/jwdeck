@@ -155,7 +155,7 @@ export default function Weekly() {
           {data.adjustments.length > 0 && (
             <div style={{ marginTop: 18 }}>
               <h3 style={{ fontWeight: 'bold', marginBottom: 4 }}>Prior-week adjustments</h3>
-              <div className="wrap"><table className="r" style={{ maxWidth: 1000 }}>
+              <div className="wrap"><table className="r">
                 <thead><tr><th className="l">Company</th><th className="l">Line</th><th>Amount</th><th className="l">Reason</th></tr></thead>
                 <tbody>{data.adjustments.map((a, i) => (
                   <tr key={i}><td className="l">{a.company}</td><td className="l">{a.label}</td><Num v={a.value} fmt={/:(PQ|SQ)$/.test(a.item) ? 'qty' : 'amount'} unit={unit} /><td className="l">{a.reason}</td></tr>

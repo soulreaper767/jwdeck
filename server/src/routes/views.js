@@ -69,6 +69,7 @@ r.get('/view/month-trend', h((req) => {
     for (const sec of v.sections) for (const x of sec.rows) if (codes.includes(x.code)) { row[x.code] = x.m.a; row[`${x.code}_B`] = x.m.b; }
     points.push(row);
   }
+  while (points.length > 1 && Object.keys(points[0]).every((k) => ['month', 'label'].includes(k) || points[0][k] == null)) points.shift();
   return { points };
 }));
 

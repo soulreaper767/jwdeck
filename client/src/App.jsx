@@ -23,7 +23,7 @@ export default function App() {
   const { user, booting, logout, isAdmin, inbox, online, sync, syncNow } = useApp();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
-  useEffect(() => setOpen(false), [loc.pathname]);
+  useEffect(() => { setOpen(false); document.querySelectorAll('details.navmore[open]').forEach((d) => d.removeAttribute('open')); }, [loc.pathname]);
   if (booting) return <Loading />;
   if (!user) return <Login />;
   const prep = user.role === 'admin' || user.role === 'company_dpo';
@@ -48,12 +48,17 @@ export default function App() {
             <NavLink to="/initiatives">Initiatives</NavLink>
             <NavLink to="/budgets">Budgets</NavLink>
             <NavLink to="/companies">Companies</NavLink>
-            {isAdmin && <>
-              <NavLink to="/lines">Lines</NavLink>
-              <NavLink to="/users">Users</NavLink>
-              <NavLink to="/settings">Settings</NavLink>
-              <NavLink to="/log">Log</NavLink>
-            </>}
+            {isAdmin && (
+              <details className={`navmore ${['/lines', '/users', '/settings', '/log'].includes(loc.pathname) ? 'on' : ''}`}>
+                <summary>Setup</summary>
+                <div className="navmore-p">
+                  <NavLink to="/lines">Reporting lines</NavLink>
+                  <NavLink to="/users">Users</NavLink>
+                  <NavLink to="/settings">Settings</NavLink>
+                  <NavLink to="/log">Log</NavLink>
+                </div>
+              </details>
+            )}
           </nav>
           <div className={`who ${open ? 'open' : ''}`}>
             <b>{user.name}</b> · {user.role_label}{user.scopes?.length ? ` · ${user.scopes.map((s) => s.name).join(', ')}` : ''}

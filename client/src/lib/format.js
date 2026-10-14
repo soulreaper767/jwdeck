@@ -21,7 +21,7 @@ export function vr(a, t, hib = 1, fmt = 'amount') {
   const d = a - t;
   const pct = fmt === 'percent' || t === 0 ? null : (d / Math.abs(t)) * 100;
   const good = hib ? d >= 0 : d <= 0;
-  const tiny = fmt === 'percent' ? Math.abs(d) < 0.05 : Math.abs(pct ?? 0) < 0.5 && Math.abs(d) < 1;
+  const tiny = fmt === 'percent' ? Math.abs(d) < 0.05 : pct != null ? Math.abs(pct) < 0.05 : Math.abs(d) < 1;
   return { d, pct, cls: tiny ? '' : good ? 'good' : 'bad' };
 }
 export const fpct = (p) => (p == null ? '' : `${p > 0 ? '+' : ''}${nf(1).format(p)}%`);

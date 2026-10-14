@@ -67,7 +67,8 @@ export class Engine {
     this.skuTotal = this.lines.find((l) => l.kind === 'sku_total')?.code;
 
     this.skus = new Map();
-    for (const s of plainAll(db.prepare('SELECT * FROM skus WHERE active = 1 ORDER BY sort, id').all())) {
+    // all SKUs, including retired ones: their past figures must keep counting
+    for (const s of plainAll(db.prepare('SELECT * FROM skus ORDER BY sort, id').all())) {
       if (!this.skus.has(s.company_id)) this.skus.set(s.company_id, []);
       this.skus.get(s.company_id).push(s);
     }
@@ -103,7 +104,10 @@ export class Engine {
   // ---- items
   skuItems(cid) { return (this.skus.get(cid) || []).flatMap((s) => [`SKU:${s.id}:PQ`, `SKU:${s.id}:SQ`, `SKU:${s.id}:SV`]); }
   items(cid) { return [...this.weekInputs, ...this.skuItems(cid)]; }
-  budgetItems(cid) { return [...this.lines.filter((l) => l.budget && l.kind === 'input').map((l) => l.code), ...this.skuItems(cid)]; }
+  budgetItems(cid) {
+    const active = (this.skus.get(cid) || []).filter((s) => s.active).flatMap((s) => [`SKU:${s.id}:PQ`, `SKU:${s.id}:SQ`, `SKU:${s.id}:SV`]);
+    return [...this.lines.filter((l) => l.budget && l.kind === 'input').map((l) => l.code), ...active];
+  }
   itemLabel(item) {
     const sk = /^SKU:(\d+):(PQ|SQ|SV)$/.exec(item);
     if (sk) {
@@ -317,13 +321,17 @@ export class Engine {
     const ps = secs.find((s) => s.code === 'PRODSALES');
     if (ps) {
       if (companyId) {
-        for (const s of this.skus.get(companyId) || []) {
-          ps.rows.push({ group: true, name: s.name, unit: s.unit });
-          ps.rows.push(mk(`SKU:${s.id}:PQ`, `Production (${s.unit})`, { fmt: 'qty', depth: 1 }));
-          ps.rows.push(mk(`SKU:${s.id}:SQ`, `Sales (${s.unit})`, { fmt: 'qty', depth: 1 }));
-          ps.rows.push(mk(`SKU:${s.id}:SV`, 'Sales value', { depth: 1 }));
+        // active SKUs, plus retired ones that still carry figures in this view
+        const hasData = (s) => D.some((vec) => ['PQ', 'SQ', 'SV'].some((p) => vec?.[`SKU:${s.id}:${p}`] != null));
+        const shown = (this.skus.get(companyId) || []).filter((s) => s.active || hasData(s));
+        for (const s of shown) {
+          const retired = !s.active;
+          ps.rows.push({ group: true, name: retired ? `${s.name} (retired)` : s.name, unit: s.unit });
+          ps.rows.push(mk(`SKU:${s.id}:PQ`, `Production (${s.unit})`, { fmt: 'qty', depth: 1, retired }));
+          ps.rows.push(mk(`SKU:${s.id}:SQ`, `Sales (${s.unit})`, { fmt: 'qty', depth: 1, retired }));
+          ps.rows.push(mk(`SKU:${s.id}:SV`, 'Sales value', { depth: 1, retired }));
         }
-        const units = [...new Set((this.skus.get(companyId) || []).map((s) => s.unit))];
+        const units = [...new Set(shown.map((s) => s.unit))];
         for (const u of units) ps.rows.push({ ...mk(`UNIT:PQ:${u}`, `Total production (${u})`, { fmt: 'qty' }), strong: true });
         for (const u of units) ps.rows.push({ ...mk(`UNIT:SQ:${u}`, `Total sales (${u})`, { fmt: 'qty' }), strong: true });
       } else {

@@ -29,7 +29,7 @@ export default function Status() {
             <thead>
               <tr>
                 <th className="l first" style={{ minWidth: 170 }}>Company</th>
-                {d.periods.map((p) => <th key={p.key} className="l gap">{p.label}<br /><span className="mute">{p.sub ? `${p.sub} · ` : ''}due {p.due.slice(5)}</span></th>)}
+                {d.periods.map((p) => <th key={p.key} className="gap" style={{ whiteSpace: 'normal', minWidth: 104 }}>{p.label}<div className="small" style={{ fontWeight: 'normal' }}>{p.sub ? <>{p.sub.replace(/ \d{4}$/, '')}<br /></> : null}due {p.due.slice(8)}/{p.due.slice(5, 7)}</div></th>)}
               </tr>
             </thead>
             <tbody>
@@ -42,7 +42,7 @@ export default function Status() {
                     <tr>
                       <td className="l first" style={{ whiteSpace: 'nowrap' }}>{r.name}</td>
                       {r.cells.map((c) => (
-                        <td key={c.key} className="l gap" style={{ cursor: c.status === 'na' ? 'default' : 'pointer' }}
+                        <td key={c.key} className="l gap" style={{ cursor: c.status === 'na' ? 'default' : 'pointer', whiteSpace: 'nowrap', fontSize: 13.5 }}
                           onClick={() => c.status !== 'na' && nav(kind === 'week' ? `/enter/${r.id}/${c.key}` : `/close/${r.id}/${c.key}`)}>
                           {c.status === 'na' ? '' : <St s={c.status} reopened={c.reopened} overdue={c.overdue} />}
                           {kind === 'month' && c.status === 'new' && !c.ready ? <span className="mute small"> · weeks pending</span> : null}

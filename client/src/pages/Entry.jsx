@@ -216,7 +216,7 @@ export default function Entry() {
                       <tr className="sec"><td colSpan={cols} className="first">{sec.name}{sec.code === 'BD' && ed ? <button className="link small noprint" style={{ marginLeft: 14 }} onClick={fillFromRegisters}>fill from pipeline & initiatives</button> : null}</td></tr>
                       {sec.rows.map((x, i) => {
                         if (x.group) return <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l first">{x.name}</td></tr>;
-                        const inp = isInput(x.code) && !x.strong;
+                        const inp = isInput(x.code) && !x.strong && !x.retired;
                         const stock = x.stock;
                         const lastSeg = segs[segs.length - 1].month;
                         const fmt = x.fmt;

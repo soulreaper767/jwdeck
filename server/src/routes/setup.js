@@ -73,7 +73,7 @@ r.get('/companies/:id/setup', h((req) => {
     can_edit_opening: req.user.role === 'admin' || (canPrepare(req.user, c.id) && !filed),
     can_edit_skus: canPrepare(req.user, c.id),
     skus: skus.map((s) => ({ ...s, used: used.has(`SKU:${s.id}:PQ`) || used.has(`SKU:${s.id}:SQ`) || used.has(`SKU:${s.id}:SV`) })),
-    suggested_start: P.lastClosedWeek(),
+    suggested_start: P.weekKey(),
   };
 }));
 
