@@ -79,6 +79,9 @@ export class Engine {
       GROUP BY company_id, ${key}) x ON x.company_id = f.company_id AND x.k = f.${key} AND x.r = f.revision`).all());
     this.filings = new Map(latest('filings', 'week_key').map((f) => [`${f.company_id}|${f.week_key}`, { ...JSON.parse(f.data_json), revision: f.revision, filed_at: f.filed_at }]));
     this.mfilings = new Map(latest('month_filings', 'month_key').map((f) => [`${f.company_id}|${f.month_key}`, { ...JSON.parse(f.data_json), revision: f.revision, filed_at: f.filed_at }]));
+    this.firstFilings = new Map(plainAll(db.prepare(`SELECT f.company_id, f.week_key, f.data_json, f.filed_at FROM filings f JOIN (SELECT company_id, week_key k, MIN(revision) r FROM filings
+      GROUP BY company_id, week_key) x ON x.company_id = f.company_id AND x.k = f.week_key AND x.r = f.revision`).all()).map((f) => [`${f.company_id}|${f.week_key}`, { ...JSON.parse(f.data_json), filed_at: f.filed_at }]));
+    this.reopenWhy = new Map(plainAll(db.prepare("SELECT company_id, period, comment FROM workflow_log WHERE kind = 'week' AND action = 'reopen' ORDER BY at").all()).map((r) => [`${r.company_id}|${r.period}`, r.comment]));
     const wr = plainAll(db.prepare('SELECT company_id, week_key, status, reopened FROM reports').all());
     this.wstatus = new Map(wr.map((r) => [`${r.company_id}|${r.week_key}`, r.status]));
     this.wreopen = new Map(wr.map((r) => [`${r.company_id}|${r.week_key}`, r.reopened]));
@@ -379,12 +382,21 @@ export class Engine {
     const mweeks = P.monthWeeks(M).filter((w) => w >= start && w <= W);
     const fyMonths = P.fyMonths(M, this.fyStartMonth);
     const prevW = [...mweeks].reverse().find((w) => w < W && this.data(c.id, w));
-    const prevD = prevW ? this.data(c.id, prevW) : null;
+    // last week's figures as originally reported (later corrections show up as re-filed changes)
+    const prevD = prevW ? (this.drafts.has(`${c.id}|${prevW}`) ? null : this.firstFilings.get(`${c.id}|${prevW}`)) || this.data(c.id, prevW) : null;
     const adjMonth = segs[0].month;
 
-    const V = { wkA: {}, wkT: {}, adjW: {}, mtdA: {}, mtdT: {}, ytdA: {}, ytdT: {}, prev: {}, thisWk: {} };
+    const PW = P.shiftWeek(W, -1);
+    const dpw = PW >= start ? this.data(c.id, PW) : null;
+    const pwSegs = P.segments(PW);
+
+    const V = { wkA: {}, wkT: {}, adjW: {}, mtdA: {}, mtdT: {}, ytdA: {}, ytdT: {}, prev: {}, thisWk: {}, pwA: {} };
     for (const item of this.items(c.id)) {
       const kind = this.itemKind(item);
+      if (dpw) {
+        if (kind !== 'flow') { const v = this.weekStock(dpw, PW, item, kind); if (v != null) V.pwA[item] = v * rr(item, pwSegs.at(-1).month); }
+        else for (const s of pwSegs) { const v = dpw.values?.[item]?.[s.month]; if (v != null) V.pwA[item] = addv(V.pwA[item] ?? null, v * rr(item, s.month)); }
+      }
       if (kind !== 'flow') {
         const r = (mo) => (this.noFx(item) ? 1 : rate(mo));
         const wk = this.weekStock(d, W, item, kind);
@@ -434,16 +446,25 @@ export class Engine {
     const cl = (e, mo) => (e?.close != null ? e.close * rate(mo) : null);
     const closing = { wk: cl(ch.get(`${W}|${lastSeg.month}`), lastSeg.month), mtd: cl(ch.get(`${W}|${M}`), M) };
     closing.ytd = closing.mtd;
+    if (dpw) {
+      const po = ch.get(`${PW}|${pwSegs[0].month}`)?.open;
+      if (po != null) V.pwA[oc] = po * rate(pwSegs[0].month);
+      closing.pw = cl(ch.get(`${PW}|${pwSegs.at(-1).month}`), pwSegs.at(-1).month);
+    }
+    // earlier weeks of this month re-filed after being reopened
+    const since = prevD?.filed_at || '';
+    const revisions = mweeks.filter((w) => w < W && (this.wreopen.get(`${c.id}|${w}`) || 0) > 0 && this.filings.get(`${c.id}|${w}`)?.revision > 1 && this.filings.get(`${c.id}|${w}`).filed_at > since)
+      .map((w) => ({ week: w, revision: this.filings.get(`${c.id}|${w}`).revision, reason: this.reopenWhy.get(`${c.id}|${w}`) || '' }));
 
     return {
-      V, closing, filed: !!d,
+      V, closing, filed: !!d, revisions, adjInMonth: adjMonth === M,
       adjList: Object.entries(d?.adj || {}).map(([item, a]) => ({ item, label: this.itemLabel(item), value: a.value, reason: a.reason })),
     };
   }
 
-  weekRows(V, closing, companyId) {
+  weekRows(V, closing, companyId, adjInMonth = true) {
     const D = {};
-    for (const vn of ['wkA', 'wkT', 'adjW', 'mtdA', 'mtdT', 'ytdA', 'ytdT', 'prev', 'thisWk']) {
+    for (const vn of ['wkA', 'wkT', 'adjW', 'mtdA', 'mtdT', 'ytdA', 'ytdT', 'prev', 'thisWk', 'pwA']) {
       const vec = V[vn] || {};
       if (vn === 'adjW') { const b = { ...vec }; delete b[this.m.openingCode]; D[vn] = { ...vec, ...derive(this.m, b) }; continue; }
       D[vn] = { ...vec, ...derive(this.m, vec) };
@@ -452,6 +473,7 @@ export class Engine {
     if (closing.wk != null) D.wkA[cc] = closing.wk;
     if (closing.mtd != null) D.mtdA[cc] = closing.mtd;
     if (closing.ytd != null) D.ytdA[cc] = closing.ytd;
+    if (closing.pw != null) D.pwA[cc] = closing.pw;
     const mk = (code, name, extra = {}) => {
       const pct = extra.fmt === 'percent' || !!extra.stock;
       const opening = extra.nature === 'opening';
@@ -461,13 +483,17 @@ export class Engine {
       const recon = !pct && !opening && (prev != null || tw != null || now != null);
       let diff = recon ? (now ?? 0) - ((prev ?? 0) + (tw ?? 0)) : null;
       if (diff != null && Math.abs(diff) < 0.5) diff = 0;
+      const adjp = recon && adjInMonth ? D.adjW[code] ?? 0 : recon ? 0 : null;
+      let refiled = recon ? diff - adjp : null;
+      if (refiled != null && Math.abs(refiled) < 0.5) refiled = 0;
       return {
         code, name, fmt: 'amount', hib: 1, depth: 0, ...extra,
         wk: { t: D.wkT[code] ?? null, a: D.wkA[code] ?? null },
         mtd: { t: D.mtdT[code] ?? null, a: now },
         ytd: { t: D.ytdT[code] ?? null, a: D.ytdA[code] ?? null },
         adj: opening ? null : D.adjW[code] ?? null,
-        prev: recon ? prev : null, this: recon ? tw : null, diff,
+        prev: recon ? prev : null, this: recon ? tw : null, diff, adjp, refiled,
+        pw: { a: D.pwA[code] ?? null },
       };
     };
     return this.sectionsFor('week', mk, companyId, [D.wkA, D.mtdA, D.ytdA]);
@@ -481,22 +507,43 @@ export class Engine {
     const cvs = [];
     const status = [];
     const adjustments = [];
-    const closing = { wk: null, mtd: null, ytd: null };
+    const closing = { wk: null, mtd: null, ytd: null, pw: null };
+    const revisions = [];
+    let adjInMonth = true;
     for (const c of companiesUnder(this.tree, nodeId)) {
       const cv = this.companyVectors(c, W, M, !isCo);
       status.push({ id: c.id, name: c.name, status: this.weekStatus(c.id, W), reopened: this.wreopen.get(`${c.id}|${W}`) || 0, filed: !!cv?.filed });
       if (!cv) continue;
       cvs.push(cv.V);
-      for (const k of ['wk', 'mtd', 'ytd']) closing[k] = addv(closing[k], cv.closing[k]);
+      for (const k of ['wk', 'mtd', 'ytd', 'pw']) closing[k] = addv(closing[k], cv.closing[k] ?? null);
       cv.adjList.forEach((a) => adjustments.push({ ...a, company: c.name }));
+      cv.revisions.forEach((x) => revisions.push({ ...x, company: c.name }));
+      adjInMonth = cv.adjInMonth;
     }
     const out = {
       node: nodeOut(node, isCo ? node.currency : this.groupCcy),
       week: P.describeWeek(W), month: M, month_label: P.monthLabel(M), fy_label: P.fyLabel(M, this.fyStartMonth),
-      sections: this.weekRows(this.sumVecs(cvs, !isCo), closing, isCo ? node.id : null),
+      sections: this.weekRows(this.sumVecs(cvs, !isCo), closing, isCo ? node.id : null, adjInMonth),
       coverage: this.coverage(status),
-      adjustments,
+      adjustments, revisions, prior_week: P.describeWeek(P.shiftWeek(W, -1)),
     };
+    // which lines each adjustment moves (an input moves its totals too)
+    const reach = adjustments.map((a) => {
+      const v = { [a.item]: a.value };
+      this.addSkuTotal(v);
+      const dv = { ...v, ...derive(this.m, v) };
+      const keys = new Set(Object.keys(dv).filter((k) => dv[k]));
+      const ck = this.collapseKey(a.item);
+      if (ck) keys.add(ck);
+      return keys;
+    });
+    for (const s of out.sections) for (const x of s.rows) {
+      if (!x.code) continue;
+      const notes = [];
+      if (x.adjp) adjustments.forEach((a, i) => { if (reach[i].has(x.code)) notes.push({ type: 'adjustment', company: a.company, week: W, line: a.label, value: a.value, reason: a.reason }); });
+      if (x.refiled) revisions.forEach((r) => notes.push({ type: 'refiled', company: r.company, week: r.week, revision: r.revision, reason: r.reason }));
+      if (notes.length) x.notes = notes;
+    }
     if (children && !isCo) out.children = this.childSummaries(node, (id) => this.weekView(id, W, M, { children: false }));
     return out;
   }
@@ -517,7 +564,7 @@ export class Engine {
     const frac = complete ? 1 : lastEnd ? P.elapsed(M, lastEnd) / P.daysInMonth(M) : 0;
     const fyMonths = P.fyMonths(M, this.fyStartMonth);
 
-    const V = { mA: {}, mB: {}, yA: {}, yB: {}, adj: {} };
+    const V = { mA: {}, mB: {}, yA: {}, yB: {}, adj: {}, rep: {} };
     const C = cols.map(() => ({}));
     const put = (vec, k, v) => { if (v != null) vec[k] = addv(vec[k] ?? null, v); };
     for (const item of this.items(c.id)) {
@@ -552,7 +599,10 @@ export class Engine {
         if (v != null) C[i][item] = v * rr(item, M);
       });
       for (const w of allW) {
-        if (w > upto || P.segments(w)[0].month !== M) continue;
+        if (w > upto) continue;
+        const f = this.firstFilings.get(`${c.id}|${w}`)?.values?.[item]?.[M];
+        if (f != null) put(V.rep, item, f * rr(item, M));
+        if (P.segments(w)[0].month !== M) continue;
         const a = this.data(c.id, w)?.adj?.[item];
         if (a) put(V.adj, item, a.value * rr(item, M));
       }
@@ -765,6 +815,7 @@ export class Engine {
     const D = {};
     for (const vn of ['mA', 'mB', 'yA', 'yB']) D[vn] = { ...(V[vn] || {}), ...derive(this.m, V[vn] || {}) };
     { const b = { ...(V.adj || {}) }; delete b[oc]; D.adj = { ...b, ...derive(this.m, b) }; }
+    { const b = { ...(V.rep || {}) }; delete b[oc]; D.rep = { ...b, ...derive(this.m, b) }; }
     const DC = C.map((vec, i) => {
       const v = { ...vec };
       const o = sumArr('colOpen', i);
@@ -782,6 +833,15 @@ export class Engine {
         y: { b: D.yB[code] ?? null, a: D.yA[code] ?? null },
         adj: extra.nature === 'opening' || !weekly ? null : D.adj[code] ?? null,
         cols: DC.map((x) => (weekly ? x[code] ?? null : null)),
+        recon: weekly && extra.nature !== 'opening' && extra.nature !== 'closing' && extra.fmt !== 'percent' && !extra.stock ? (() => {
+          const rep0 = D.rep[code] ?? null;
+          const adj = D.adj[code] ?? 0;
+          const now = D.mA[code] ?? null;
+          if (rep0 == null && now == null) return null;
+          let refiled = (now ?? 0) - (rep0 ?? 0) - adj;
+          if (Math.abs(refiled) < 0.5) refiled = 0;
+          return { reported: rep0 ?? 0, adj, refiled, month: now ?? 0 };
+        })() : null,
       };
     };
     const out = {
@@ -789,6 +849,13 @@ export class Engine {
       month: M, month_label: P.monthLabel(M), fy_label: P.fyLabel(M, this.fyStartMonth),
       complete, through: lastEnd,
       columns: cols.map(({ week, seg }) => ({ week, label: seg.label, days: seg.days })),
+      changes: companiesUnder(this.tree, nodeId).flatMap((c) => cols.flatMap(({ week }) => {
+        const out2 = [];
+        if (P.segments(week)[0].month === M) for (const [item, a] of Object.entries(this.data(c.id, week)?.adj || {})) out2.push({ type: 'adjustment', company: c.name, week, line: this.itemLabel(item), value: a.value, reason: a.reason });
+        const f = this.filings.get(`${c.id}|${week}`);
+        if (f?.revision > 1 && (this.wreopen.get(`${c.id}|${week}`) || 0) > 0) out2.push({ type: 'refiled', company: c.name, week, revision: f.revision, reason: this.reopenWhy.get(`${c.id}|${week}`) || '' });
+        return out2;
+      })),
       sections: this.sectionsFor(null, mk, isCo ? node.id : null, [D.mA, D.yA]),
       coverage: this.coverage(status),
     };

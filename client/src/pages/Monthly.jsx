@@ -22,7 +22,7 @@ function BA({ p, x, unit }) {
   );
 }
 
-function Head({ data, weeks, cmp }) {
+function Head({ data, weeks, cmp, recon }) {
   return (
     <thead>
       <tr className="g">
@@ -31,6 +31,7 @@ function Head({ data, weeks, cmp }) {
         <th colSpan={4} className="gap">{data.month_label}{data.complete ? '' : ` · to ${data.through ? data.through.slice(8) + ' ' + data.month_label.slice(0, 3) : '—'}`}</th>
         <th colSpan={4} className="gap">YTD · {data.fy_label}</th>
         {cmp && <th colSpan={3} className="gap">vs {cmp}</th>}
+        {recon && <th colSpan={4} className="gap">Reconciliation · weeks to month</th>}
       </tr>
       <tr>
         <th className="l first" style={{ minWidth: 220 }} />
@@ -38,12 +39,13 @@ function Head({ data, weeks, cmp }) {
         <th className="gap">Budget</th><th>Actual</th><th>Var</th><th>%</th>
         <th className="gap">Budget</th><th>Actual</th><th>Var</th><th>%</th>
         {cmp && <><th className="gap">{cmp.split(' · ')[0]}</th><th>Change</th><th>%</th></>}
+        {recon && <><th className="gap" title="Weekly figures as first submitted">As reported</th><th>Adjustments</th><th>Re-filed</th><th>= Month</th></>}
       </tr>
     </thead>
   );
 }
 
-function Row({ x: x0, unit, weeks, ncols, cmp, c }) {
+function Row({ x: x0, unit, weeks, ncols, cmp, c, recon }) {
   const x = x0.fmt === 'flag' ? { ...x0, fmt: 'count' } : x0;
   return (
     <tr className={x.grand ? 'grand' : x.strong ? 'tot' : ''}>
@@ -58,6 +60,12 @@ function Row({ x: x0, unit, weeks, ncols, cmp, c }) {
         const cls = d == null || Math.abs(d) < 1 ? '' : (x.hib ? d >= 0 : d <= 0) ? 'good' : 'bad';
         return <><Num className="gap lock" v={c} fmt={x.fmt} unit={unit} /><Num className={cls} v={op ? null : d} fmt={x.fmt} unit={unit} /><td className={`n ${cls}`}>{op ? '' : fpct(pct)}</td></>;
       })()}
+      {recon && (x.recon ? <>
+        <Num className="gap lock" v={x.recon.reported} fmt={x.fmt} unit={unit} />
+        {x.recon.adj ? <Num className="adjv" v={x.recon.adj} fmt={x.fmt} unit={unit} /> : <td className="n zero">0</td>}
+        {x.recon.refiled ? <Num className="adjv" v={x.recon.refiled} fmt={x.fmt} unit={unit} /> : <td className="n zero">0</td>}
+        <Num className="tot-c" v={x.recon.month} fmt={x.fmt} unit={unit} />
+      </> : <><td className="gap" /><td /><td /><td /></>)}
     </tr>
   );
 }
@@ -83,10 +91,11 @@ function MonthReport() {
   const cchild = (id, code) => cmpData?.children?.find((x) => x.id === id)?.rows[code]?.c.a ?? null;
   const cmp = cmpData?.compare_label;
   const [weeks, setWeeks] = useState(false);
+  const [recon, setRecon] = useState(true);
   const [full, setFull] = useState(false);
   const { data, err } = useView('/view/month', { node: view.nodeId, month }, [view.nodeId, month]);
   const unit = view.unit;
-  const cols = data ? 1 + (weeks ? data.columns.length + 1 : 0) + 8 + (cmp ? 3 : 0) : 1;
+  const cols = data ? 1 + (weeks ? data.columns.length + 1 : 0) + 8 + (cmp ? 3 : 0) + (recon ? 4 : 0) : 1;
   const allRows = data ? data.sections.flatMap((s) => s.rows).filter((x) => x.code) : [];
 
   const exportCsv = () => {
@@ -105,6 +114,7 @@ function MonthReport() {
         <Seg value={cmpMode} options={[['prev', 'vs prev. month'], ['ly', 'vs last year']]} onChange={(c) => setView({ pcmp: c })} />
         <UnitSelect />
         <label className="c"><input type="checkbox" checked={weeks} onChange={(e) => setWeeks(e.target.checked)} />Weeks</label>
+        <label className="c"><input type="checkbox" checked={recon} onChange={(e) => setRecon(e.target.checked)} />Reconciliation</label>
         <span className="sp" />
         {data && <button onClick={exportCsv}>Export</button>}
         <PrintButton />
@@ -125,20 +135,38 @@ function MonthReport() {
           {data.children && <h2 className="part">{data.node.type === 'group' ? 'Group summary' : 'Cluster summary'}</h2>}
           <div className="wrap">
             <table className="r">
-              <Head data={data} weeks={weeks} cmp={cmp} />
+              <Head data={data} weeks={weeks} cmp={cmp} recon={recon} />
               <tbody>
                 {data.sections.map((s) => (
                   <Fragment key={s.code}>
                     <tr className="sec"><td colSpan={cols} className="first">{s.name}</td></tr>
                     {s.rows.filter((x) => !emptyMonthRow(x)).map((x, i) => (x.group
                       ? <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l first">{x.name}</td></tr>
-                      : <Row key={x.code} x={x} unit={unit} weeks={weeks} ncols={data.columns.length} cmp={cmp} c={cflat[x.code] ?? null} />))}
+                      : <Row key={x.code} x={x} unit={unit} weeks={weeks} ncols={data.columns.length} cmp={cmp} c={cflat[x.code] ?? null} recon={recon} />))}
                   </Fragment>
                 ))}
               </tbody>
             </table>
           </div>
 
+          {recon && (
+            <div className="cc" style={{ marginTop: 16 }}>
+              <div className="cc-h"><span className="cc-t">Changes in {data.month_label}</span><span className="cc-s">prior-week adjustments and re-filed weeks</span></div>
+              {!data.changes?.length ? <div className="small"><b>0</b> · weekly figures stand as reported</div> : (
+                <table className="r pbi">
+                  <thead><tr><th className="l">Company</th><th className="l">Week</th><th className="l">Change</th><th>Amount</th><th className="l">Reason</th></tr></thead>
+                  <tbody>{data.changes.map((n, i) => (
+                    <tr key={i}>
+                      <td className="l">{n.company}</td><td className="l">{n.week.slice(5)}</td>
+                      <td className="l">{n.type === 'adjustment' ? n.line : `Re-filed (revision ${n.revision})`}</td>
+                      {n.type === 'adjustment' ? <Num className="adjv" v={n.value} fmt="amount" unit={unit} /> : <td />}
+                      <td className="l">{n.reason}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              )}
+            </div>
+          )}
           {data.children?.length > 0 && (
             <>
               <div className="row" style={{ marginTop: 10 }}>

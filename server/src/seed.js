@@ -335,6 +335,26 @@ tx(() => {
   }
 });
 
+// ---- a week reopened after approval and re-filed with a correction (shows as a re-filed change)
+tx(() => {
+  const cid = ids.RJF;
+  const W = '2026-W38';
+  const M = '2026-09';
+  const add = 1500000;
+  const rp = db.prepare('SELECT * FROM reports WHERE company_id = ? AND week_key = ?').get(cid, W);
+  const f1 = db.prepare('SELECT * FROM filings WHERE report_id = ? ORDER BY revision LIMIT 1').get(rp.id);
+  if (!f1) return;
+  const d = JSON.parse(f1.data_json);
+  d.values.REC_OPS[M] += add;
+  if (d.reported?.[M]) d.reported[M].REC_OPS = (d.reported[M].REC_OPS || 0) + add;
+  db.prepare('UPDATE report_values SET value = value + ? WHERE report_id = ? AND item = ? AND month_key = ?').run(add, rp.id, 'REC_OPS', M);
+  db.prepare('UPDATE reports SET revision = 2, reopened = 1 WHERE id = ?').run(rp.id);
+  const base = new Date(P.weekEnd('2026-W39').getTime() + 2 * 86400000 + 9 * 3600000);
+  wf.run('week', cid, W, 'reopen', 'approved', 'reopened', users['group.reviewer@jwdash.local'], 'Bank statement shows a customer receipt of 1.5m on 18 Sep not in the report. Please correct and resubmit.', ts(base, 0));
+  filIns.run(rp.id, cid, W, 2, 'PKR', JSON.stringify(d), users['rjf.dpo@jwdash.local'], ts(base, 3));
+  flow('week', cid, 'RJF', W, new Date(base.getTime() + 3 * 3600000), 'approved', 'cgc');
+});
+
 // ---- month close: P&L for completed months
 const eng2 = new Engine();
 const mrIns = db.prepare('INSERT INTO month_reports(company_id, month_key, status, revision, remarks, updated_by, updated_at) VALUES (?,?,?,?,?,?,?)');
