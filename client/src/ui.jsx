@@ -155,6 +155,7 @@ export const periodQuery = (view, periods) => ({
   month: view.pmonth || periods?.last_month,
   fy: view.pfy || periods?.current_fy,
   q: view.pq || periods?.current_q,
+  h: view.ph || periods?.current_h,
   cmp: view.pcmp || 'prev',
 });
 
@@ -172,7 +173,8 @@ export function PeriodPicker({ mode: forced }) {
         </select>
       )}
       {mode === 'quarter' && <Seg value={Number(q.q)} options={[1, 2, 3, 4].map((n) => [n, `Q${n}`])} onChange={(n) => setView({ pq: n })} />}
-      {mode !== 'year' && <Seg value={q.cmp} options={[['prev', mode === 'month' ? 'vs prev. month' : 'vs prev. quarter'], ['ly', 'vs last year']]} onChange={(c) => setView({ pcmp: c })} />}
+      {mode === 'half' && <Seg value={Number(q.h)} options={[1, 2].map((n) => [n, `H${n}`])} onChange={(n) => setView({ ph: n })} />}
+      {mode !== 'year' && <Seg value={q.cmp} options={[['prev', { month: 'vs prev. month', quarter: 'vs prev. quarter', half: 'vs prev. half' }[mode]], ['ly', 'vs last year']]} onChange={(c) => setView({ pcmp: c })} />}
     </>
   );
 }

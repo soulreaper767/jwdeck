@@ -45,7 +45,7 @@ r.get('/view/analytics', h((req) => {
   if (!node) throw notFound('Node not found');
   if (!canView(req.user, nodeId, eng.tree)) throw forbidden();
   const W = P.isWeek(req.query.week) ? req.query.week : P.lastClosedWeek();
-  const periodMode = ['month', 'quarter', 'year'].includes(req.query.mode) ? req.query.mode : null;
+  const periodMode = ['month', 'quarter', 'half', 'year'].includes(req.query.mode) ? req.query.mode : null;
   const spec = periodMode ? eng.periodSpec(req.query) : null;
   const basis = periodMode ? 'p' : ['wk', 'mtd', 'ytd'].includes(req.query.basis) ? req.query.basis : 'mtd';
   const M = P.shiftMonth(P.monthOfDate(new Date()), -1);

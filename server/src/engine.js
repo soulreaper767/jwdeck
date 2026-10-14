@@ -666,7 +666,7 @@ export class Engine {
   // ================================================================ PERIOD (month / quarter / year, to date)
 
   // Resolve a period request into months, cut-off week and the comparative span
-  periodSpec({ mode, month, fy, q, cmp } = {}) {
+  periodSpec({ mode, month, fy, q, h, cmp } = {}) {
     const s = this.fyStartMonth;
     const curM = P.monthOfDate(new Date());
     const upto = P.lastClosedWeek();
@@ -691,6 +691,13 @@ export class Engine {
       label = `Q${Q} ${fyL(F)}`;
       step = cmp === 'ly' ? 12 : 3;
       cmpLabel = cmp === 'ly' ? `Q${Q} ${fyL(F - 1)}` : Q === 1 ? `Q4 ${fyL(F - 1)}` : `Q${Q - 1} ${fyL(F)}`;
+    } else if (mode === 'half') {
+      const hNow = P.fyMonths(curM, s).length > 6 ? 2 : 1;
+      const H = Number(h) === 2 ? 2 : Number(h) === 1 ? 1 : F === fyNow ? hNow : 2;
+      all = P.fyAllMonths(F, s).slice((H - 1) * 6, H * 6);
+      label = `H${H} ${fyL(F)}`;
+      step = cmp === 'ly' ? 12 : 6;
+      cmpLabel = cmp === 'ly' ? `H${H} ${fyL(F - 1)}` : H === 1 ? `H2 ${fyL(F - 1)}` : `H1 ${fyL(F)}`;
     } else {
       all = P.fyAllMonths(F, s);
       label = fyL(F);
@@ -700,9 +707,9 @@ export class Engine {
     const months = all.filter((m) => m <= curM);
     const partial = all[all.length - 1] >= curM;
     const back = (d, n) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - n, Math.min(d.getUTCDate(), 28)));
-    const tag = mode === 'month' ? 'MTD' : mode === 'quarter' ? 'QTD' : 'YTD';
+    const tag = { month: 'MTD', quarter: 'QTD', half: 'HTD' }[mode] || 'YTD';
     return {
-      mode: mode === 'month' || mode === 'quarter' ? mode : 'year', cmp: mode === 'year' ? 'ly' : cmp === 'ly' ? 'ly' : 'prev',
+      mode: ['month', 'quarter', 'half'].includes(mode) ? mode : 'year', cmp: mode === 'year' ? 'ly' : cmp === 'ly' ? 'ly' : 'prev',
       all, months, upto, partial, future: !months.length, fy: F,
       label: partial && months.length ? `${label} · ${tag}` : label, through: partial ? P.ymd(thru) : null,
       compare: {

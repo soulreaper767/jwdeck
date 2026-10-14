@@ -146,7 +146,7 @@ function UnitTable({ data, unit, onPick }) {
 export function usePeriod() {
   const { view, periods } = useApp();
   const q = periodQuery(view, periods);
-  return useView('/view/period', { node: view.nodeId, ...q }, [view.nodeId, q.mode, q.month, q.fy, q.q, q.cmp]);
+  return useView('/view/period', { node: view.nodeId, ...q }, [view.nodeId, q.mode, q.month, q.fy, q.q, q.h, q.cmp]);
 }
 
 // dashboard for a month / quarter / year

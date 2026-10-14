@@ -70,7 +70,7 @@ function Row({ x: x0, unit, weeks, ncols, cmp, c, recon }) {
   );
 }
 
-const RMODES = [['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
+const RMODES = [['month', 'Month'], ['quarter', 'Quarter'], ['half', 'Half-year'], ['year', 'Year']];
 function RModeSeg() {
   const { view, setView } = useApp();
   return <Seg value={view.pmode && view.pmode !== 'week' ? view.pmode : 'month'} options={RMODES} onChange={(m) => setView({ pmode: m })} />;
@@ -78,7 +78,7 @@ function RModeSeg() {
 
 export default function Monthly() {
   const { view } = useApp();
-  if (view.pmode === 'quarter' || view.pmode === 'year') return <PeriodReport modeBar={<RModeSeg />} />;
+  if (['quarter', 'half', 'year'].includes(view.pmode)) return <PeriodReport modeBar={<RModeSeg />} />;
   return <MonthReport />;
 }
 

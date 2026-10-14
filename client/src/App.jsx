@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from './store.jsx';
 import { Loading } from './ui.jsx';
 import Login from './pages/Login.jsx';
@@ -23,6 +23,9 @@ export default function App() {
   const { user, booting, logout, isAdmin, inbox, online, sync, syncNow } = useApp();
   const [open, setOpen] = useState(false);
   const loc = useLocation();
+  const nav = useNavigate();
+  // signed out (button or expired session): always come back to the start page
+  useEffect(() => { if (!booting && !user && loc.pathname !== '/') nav('/', { replace: true }); }, [user, booting]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setOpen(false); document.querySelectorAll('details.navmore[open]').forEach((d) => d.removeAttribute('open')); }, [loc.pathname]);
   if (booting) return <Loading />;
   if (!user) return <Login />;
@@ -69,7 +72,7 @@ export default function App() {
           </nav>
           <div className={`who ${open ? 'open' : ''}`}>
             <b>{user.name}</b> · {user.role_label}{user.scopes?.length ? ` · ${user.scopes.map((s) => s.name).join(', ')}` : ''}
-            {' '}<button className="link" onClick={logout}>sign out</button>
+            {' '}<button className="link" onClick={() => { logout(); nav('/', { replace: true }); }}>sign out</button>
           </div>
         </div>
       </header>
@@ -78,10 +81,10 @@ export default function App() {
           <Route path="/" element={<Overview />} />
           <Route path="/weekly" element={<Weekly />} />
           <Route path="/monthly" element={<Monthly />} />
-          <Route path="/enter" element={<Entry />} />
+          <Route path="/enter" element={prep ? <Entry /> : <Navigate to="/" replace />} />
           <Route path="/enter/:cid" element={<Entry />} />
           <Route path="/enter/:cid/:week" element={<Entry />} />
-          <Route path="/close" element={<Close />} />
+          <Route path="/close" element={prep ? <Close /> : <Navigate to="/" replace />} />
           <Route path="/close/:cid" element={<Close />} />
           <Route path="/close/:cid/:month" element={<Close />} />
           <Route path="/review" element={user.role === 'executive' ? <Navigate to="/" /> : <Review />} />

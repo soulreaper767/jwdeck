@@ -71,7 +71,7 @@ export function ChartCard({ title, sub, children, h = 260 }) {
 
 const axis = { tick: { fontSize: 12, fill: '#605E5C' }, axisLine: false, tickLine: false };
 
-const MODES = [['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
+const MODES = [['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter'], ['half', 'Half-year'], ['year', 'Year']];
 
 export default function Overview() {
   const { view } = useApp();

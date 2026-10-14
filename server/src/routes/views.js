@@ -27,7 +27,7 @@ r.get('/periods', h(() => {
   const fyNow = Number(P.fyStart(curM, fs).slice(0, 4));
   const fys = [fyNow + 1, fyNow, fyNow - 1, fyNow - 2].map((y) => ({ fy: y, label: P.fyLabel(`${y}-${String(fs).padStart(2, '0')}`, fs) }));
   const currentQ = Math.floor((P.fyMonths(curM, fs).length - 1) / 3) + 1;
-  return { current_week: cur, last_closed: P.lastClosedWeek(), weeks, months, current_month: curM, last_month: P.shiftMonth(curM, -1), fys, current_fy: fyNow, current_q: currentQ };
+  return { current_week: cur, last_closed: P.lastClosedWeek(), weeks, months, current_month: curM, last_month: P.shiftMonth(curM, -1), fys, current_fy: fyNow, current_q: currentQ, current_h: currentQ > 2 ? 2 : 1 };
 }));
 
 r.get('/view/week', h((req) => {

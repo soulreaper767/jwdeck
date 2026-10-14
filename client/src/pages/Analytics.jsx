@@ -49,12 +49,12 @@ function Podium({ title, list, unit, code, hib, good }) {
 export default function Analytics() {
   const { view, setView, periods } = useApp();
   const [basis, setBasis] = useState('mtd');
-  const per = ['month', 'quarter', 'year'].includes(basis);
+  const per = ['month', 'quarter', 'half', 'year'].includes(basis);
   const pq = periodQuery(view, periods);
   const [metric, setMetric] = useState('REV_NET');
   const [scope, setScope] = useState('companies');
   const unit = view.unit;
-  const { data, err } = useView('/view/analytics', { node: view.nodeId, week: view.week, basis, ...(per ? { ...pq, mode: basis } : {}) }, [view.nodeId, view.week, basis, per && pq.month, per && pq.fy, per && pq.q, per && pq.cmp]);
+  const { data, err } = useView('/view/analytics', { node: view.nodeId, week: view.week, basis, ...(per ? { ...pq, mode: basis } : {}) }, [view.nodeId, view.week, basis, per && pq.month, per && pq.fy, per && pq.q, per && pq.h, per && pq.cmp]);
 
   if (err) return <div className="note err">{err}</div>;
   const sets = data ? (scope === 'units' && data.rankings.units.length ? data.rankings.units : data.rankings.companies.length ? data.rankings.companies : data.rankings.units) : [];
@@ -67,7 +67,7 @@ export default function Analytics() {
     <>
       <div className="bar">
         <NodeSelect value={view.nodeId} onChange={(id) => setView({ nodeId: id })} />
-        <Seg value={basis} options={[['wk', 'Week'], ['mtd', 'MTD'], ['ytd', 'YTD'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']]} onChange={setBasis} />
+        <Seg value={basis} options={[['wk', 'Week'], ['mtd', 'MTD'], ['ytd', 'YTD'], ['month', 'Month'], ['quarter', 'Quarter'], ['half', 'Half-year'], ['year', 'Year']]} onChange={setBasis} />
         {per ? <PeriodPicker mode={basis} /> : <WeekSelect value={view.week} onChange={(w) => setView({ week: w })} />}
         <UnitSelect />
         <span className="sp" />
