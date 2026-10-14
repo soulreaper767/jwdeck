@@ -190,6 +190,40 @@ CREATE TABLE IF NOT EXISTS workflow_log (
 );
 CREATE INDEX IF NOT EXISTS ix_wf ON workflow_log(kind, company_id, period);
 
+-- Registers behind the weekly Business Development figures. uid makes every record unique across installs;
+-- deletions are soft so they sync.
+CREATE TABLE IF NOT EXISTS opportunities (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid            TEXT NOT NULL UNIQUE,
+  company_id     INTEGER NOT NULL REFERENCES nodes(id),
+  customer       TEXT NOT NULL,
+  title          TEXT,
+  value          REAL NOT NULL DEFAULT 0,
+  stage          TEXT NOT NULL DEFAULT 'lead' CHECK (stage IN ('lead','proposal','negotiation','awaiting','won','lost')),
+  probability    INTEGER,
+  created_on     TEXT NOT NULL,
+  expected_close TEXT,
+  closed_on      TEXT,
+  owner          TEXT,
+  notes          TEXT,
+  updated_at     TEXT NOT NULL,
+  deleted        INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS initiatives (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid         TEXT NOT NULL UNIQUE,
+  company_id  INTEGER NOT NULL REFERENCES nodes(id),
+  title       TEXT NOT NULL,
+  owner       TEXT,
+  start_date  TEXT NOT NULL,
+  target_date TEXT,
+  status      TEXT NOT NULL DEFAULT 'planned' CHECK (status IN ('planned','in_progress','done','dropped')),
+  progress    INTEGER NOT NULL DEFAULT 0,
+  notes       TEXT,
+  updated_at  TEXT NOT NULL,
+  deleted     INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS fx_rates (
   currency  TEXT NOT NULL,
   month_key TEXT NOT NULL,

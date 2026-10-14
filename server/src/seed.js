@@ -4,9 +4,11 @@ import bcrypt from 'bcryptjs';
 import { db, tx } from './db.js';
 import { Engine } from './engine.js';
 import * as P from './periods.js';
+import crypto from 'node:crypto';
+import { bdFromRegisters } from './routes/registers.js';
 
 const demo = process.argv.includes('--demo');
-const TABLES = ['audit', 'workflow_log', 'month_filings', 'month_values', 'month_reports', 'filings', 'report_notes', 'report_adj', 'report_values',
+const TABLES = ['initiatives', 'opportunities', 'audit', 'workflow_log', 'month_filings', 'month_values', 'month_reports', 'filings', 'report_notes', 'report_adj', 'report_values',
   'reports', 'budget_month', 'budget_annual', 'company_setup', 'skus', 'user_scopes', 'users', 'fx_rates', 'lines', 'sections', 'nodes'];
 
 let seed = 7;
@@ -179,6 +181,39 @@ tx(() => {
   }
 });
 
+// ---- sample pipeline and initiatives; weekly business-development figures are derived from these
+const CUSTOMERS = ['Metro Distributors', 'Al-Noor Traders', 'City Mart', 'Green Valley Foods', 'Prime Retail', 'Sapphire Hotels', 'National Exports', 'Royal Bakers', 'Star Packaging Users', 'Crescent Dairy Co-op', 'Galaxy Supermarkets', 'Pak-Gulf Trading'];
+const INITS = ['Distribution tie-up in Southern Punjab', 'Export market study (GCC)', 'Solar power for plant', 'Cold-chain expansion', 'Key-account program', 'ERP roll-out', 'New product line trial'];
+tx(() => {
+  const oi = db.prepare(`INSERT INTO opportunities(uid, company_id, customer, title, value, stage, probability, created_on, expected_close, closed_on, owner, notes, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
+  const ii = db.prepare('INSERT INTO initiatives(uid, company_id, title, owner, start_date, target_date, status, progress, notes, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)');
+  const DAY = 86400000;
+  for (const [code, p] of Object.entries(PROFILES)) {
+    const cid = ids[code];
+    const weekVal = p.dailyRev * 7;
+    weeks.forEach((w, wi) => {
+      const n = 2 + Math.floor(rnd() * 6);
+      for (let k = 0; k < n; k++) {
+        const opened = new Date(P.weekStart(w).getTime() + Math.floor(rnd() * 7) * DAY);
+        const value = Math.round((weekVal * (0.02 + rnd() * 0.08)) / 1000) * 1000;
+        const roll = rnd();
+        const closeAt = new Date(opened.getTime() + (7 + Math.floor(rnd() * 28)) * DAY);
+        const closed = closeAt <= P.weekEnd(LAST);
+        const stage = closed ? (roll < 0.55 ? 'won' : 'lost') : roll < 0.25 ? 'awaiting' : roll < 0.5 ? 'negotiation' : roll < 0.75 ? 'proposal' : 'lead';
+        oi.run(crypto.randomUUID(), cid, CUSTOMERS[Math.floor(rnd() * CUSTOMERS.length)], null, value, stage, { lead: 10, proposal: 30, negotiation: 50, awaiting: 80, won: 100, lost: 0 }[stage],
+          P.ymd(opened), P.ymd(closeAt), closed ? P.ymd(closeAt) : null, null, null, new Date().toISOString());
+      }
+      if (wi % 6 === 2) {
+        const start = new Date(P.weekStart(w).getTime() + 2 * DAY);
+        const st = wi < weeks.length - 6 ? (rnd() < 0.5 ? 'done' : 'in_progress') : 'planned';
+        ii.run(crypto.randomUUID(), cid, INITS[(wi + code.length) % INITS.length], null, P.ymd(start), P.ymd(new Date(start.getTime() + 90 * DAY)), st,
+          st === 'done' ? 100 : st === 'in_progress' ? 40 + Math.floor(rnd() * 40) : 0, null, new Date().toISOString());
+      }
+    });
+  }
+});
+
 const eng = new Engine();
 const repIns = db.prepare('INSERT INTO reports(company_id, week_key, status, revision, remarks, updated_by, updated_at) VALUES (?,?,?,?,?,?,?)');
 const valIns = db.prepare('INSERT INTO report_values(report_id, item, month_key, value) VALUES (?,?,?,?)');
@@ -245,20 +280,11 @@ tx(() => {
         if (wi % 11 === 6) put('REC_INV', s.month, k(net * 0.03));
         if (code === 'RJB' && wi === 5) put('REC_FIN', s.month, 25e6);
       }
-      {
-        const last = P.segments(w).at(-1).month;
-        const weekNet = Object.entries(values.REC_OPS || {}).reduce((t, [, v]) => t + v, 0);
-        const k = (x) => Math.round(x / 1000) * 1000;
-        put('BD_LEADS', last, Math.max(0, Math.round(6 * jitter(0.6))));
-        put('BD_LEADS_V', last, k(weekNet * 0.25 * jitter(0.5)));
-        put('BD_PIPE', last, k(weekNet * 2.2 * jitter(0.15)));
-        put('BD_CONF', last, k(weekNet * 0.12 * jitter(0.4)));
-        put('BD_TBD', last, k(weekNet * 0.5 * jitter(0.3)));
-        put('BD_INIT', last, wi % 6 === 2 ? 1 : 0);
-      }
+      const bd = bdFromRegisters(cid, w);
+      for (const [k, v] of Object.entries(bd.values)) put(k, P.segments(w).at(-1).month, v);
       const adj = {};
       const notes = {};
-      if (values.BD_INIT && Object.values(values.BD_INIT).some((v) => v)) notes.BD_INIT = ['Distribution tie-up in Southern Punjab', 'New export market study (GCC)', 'Solar power for plant', 'Cold-chain expansion', 'Key-account program'][wi % 5];
+      if (bd.values.BD_INIT) notes.BD_INIT = bd.note;
       const a = ADJ[`${code}|${w}`];
       if (a) adj[a[0] === 'SV0' ? `SKU:${p.skuIds[0]}:SV` : a[0]] = { value: a[1], reason: a[2] };
       if (code === 'RJF' && w === '2026-W35') { values.CB_OTHER = { [P.segments(w)[0].month]: -500000 }; notes.CB_OTHER = 'Bank charges & withholding on profit, per statement'; }

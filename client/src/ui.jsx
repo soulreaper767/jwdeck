@@ -128,3 +128,23 @@ export function Workflow({ base, status, reopened, actions = [], log = [], onDon
 }
 
 export const Loading = () => <div className="empty">Loading…</div>;
+
+export const PrintButton = () => <button className="noprint" onClick={() => window.print()}>Print / PDF</button>;
+
+// Shown only on paper: logo, profile line, report title, period and print time
+export function PrintHeader({ node, title, period }) {
+  const { nodes } = useApp();
+  const full = nodes.get(node?.id) || node || {};
+  const meta = full.meta || {};
+  return (
+    <div className="print-only print-head">
+      <Logo node={full} size="lg" />
+      <div>
+        <div className="ph-name">{full.name}</div>
+        <div className="ph-sub">{[meta.legal_name, meta.entity_type, meta.business_nature].filter(Boolean).join(' · ')}</div>
+        <div className="ph-title">{title}{period ? ` — ${period}` : ''}</div>
+      </div>
+      <div className="ph-time">Printed {new Date().toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+    </div>
+  );
+}

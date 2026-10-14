@@ -445,7 +445,7 @@ export class Engine {
     if (closing.mtd != null) D.mtdA[cc] = closing.mtd;
     if (closing.ytd != null) D.ytdA[cc] = closing.ytd;
     const mk = (code, name, extra = {}) => {
-      const pct = extra.fmt === 'percent' || extra.fmt === 'flag' || extra.nature === 'balance' || (extra.fmt === 'number' && extra.stock);
+      const pct = extra.fmt === 'percent' || !!extra.stock;
       const opening = extra.nature === 'opening';
       const prev = D.prev[code] ?? null;
       const tw = D.thisWk[code] ?? null;

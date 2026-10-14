@@ -11,6 +11,8 @@ import setupRoutes from './routes/setup.js';
 import reportRoutes from './routes/report.js';
 import viewRoutes from './routes/views.js';
 import monthRoutes from './routes/month.js';
+import registerRoutes from './routes/registers.js';
+import analyticsRoutes from './routes/analytics.js';
 import adminRoutes from './routes/admin.js';
 import hubRoutes from './sync/hub.js';
 import nodeRoutes, { start as startSync, schedule as scheduleSync } from './sync/node.js';
@@ -32,7 +34,7 @@ app.get('/api/health', (req, res) => res.json({ ok: true }));
 if (isNode()) app.use('/api', (req, res, next) => { res.on('finish', () => { if (req.method !== 'GET' && res.statusCode < 400 && !req.path.startsWith('/sync')) scheduleSync(); }); next(); });
 app.use('/api', nodeRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api', requireAuth, hubRoutes, treeRoutes, setupRoutes, reportRoutes, monthRoutes, viewRoutes, adminRoutes);
+app.use('/api', requireAuth, hubRoutes, treeRoutes, setupRoutes, registerRoutes, reportRoutes, monthRoutes, viewRoutes, analyticsRoutes, adminRoutes);
 app.use('/api', (req, res) => res.status(404).json({ error: 'Unknown endpoint' }));
 
 const dist = process.env.JW_DIST || path.join(__dirname, '..', '..', 'client', 'dist');

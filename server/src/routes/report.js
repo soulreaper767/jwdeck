@@ -86,7 +86,9 @@ r.get('/report/:cid/:week', h((req) => {
   const prevW = P.shiftWeek(W, -1);
   const pf = eng.filings.get(`${c.id}|${prevW}`);
   const lastWeek = {};
-  if (pf) for (const [item, byM] of Object.entries(pf.values || {})) lastWeek[item] = Object.values(byM).reduce((a, v) => a + v, 0);
+  if (pf && setup && prevW >= setup.start_week) {
+    for (const s of eng.weekView(c.id, prevW, null, { children: false }).sections) for (const x of s.rows) if (x.code && x.wk?.a != null) lastWeek[x.code] = x.wk.a;
+  }
 
   return {
     company: { ...c, meta: JSON.parse(c.meta || '{}') }, path: pathOf(eng.tree, c.id), week: P.describeWeek(W),

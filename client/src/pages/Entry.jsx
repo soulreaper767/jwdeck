@@ -104,6 +104,20 @@ export default function Entry() {
   const sections = pv?.[month] || null;
   const order = useMemo(() => (sections ? sections.flatMap((x) => x.rows).filter((r) => r.code && isInput(r.code) && !r.strong).map((r) => r.code) : []), [sections]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const fillFromRegisters = async () => {
+    try {
+      const r = await api.get(`${url}/autofill`);
+      if (!r.has) return notify('No pipeline or initiatives recorded for this company', 'err');
+      const last = segs[segs.length - 1].month;
+      change((st) => {
+        for (const [k, v] of Object.entries(r.values)) { for (const g of segs) if (st.values[k]) delete st.values[k][g.month]; (st.values[k] ||= {})[last] = plainNum(v); }
+        if (r.values.BD_INIT && r.note) st.notes.BD_INIT = r.note;
+        return st;
+      });
+      if (r.values.BD_INIT) setOpenAdj((o) => new Set([...o, 'BD_INIT']));
+      notify('Filled from pipeline and initiatives');
+    } catch (x) { notify(x.message, 'err'); }
+  };
   const save = async () => {
     setBusy(true);
     try { await api.put(url, toNum(s)); notify('Saved'); setDirty(false); } catch (e) { notify(e.message, 'err'); } finally { setBusy(false); }
@@ -199,7 +213,7 @@ export default function Entry() {
                 <tbody>
                   {sections.map((sec) => (
                     <Fragment key={sec.code}>
-                      <tr className="sec"><td colSpan={cols} className="first">{sec.name}</td></tr>
+                      <tr className="sec"><td colSpan={cols} className="first">{sec.name}{sec.code === 'BD' && ed ? <button className="link small noprint" style={{ marginLeft: 14 }} onClick={fillFromRegisters}>fill from pipeline & initiatives</button> : null}</td></tr>
                       {sec.rows.map((x, i) => {
                         if (x.group) return <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l first">{x.name}</td></tr>;
                         const inp = isInput(x.code) && !x.strong;
@@ -233,10 +247,10 @@ export default function Entry() {
                               <td className="n gap">{fv(x.wk.a, fmt, '1')}</td>
                               <td className="n lock">{op ? '' : fv(x.wk.t, fmt, '1')}</td>
                               <td className={`n ${pc(x.wk).cls}`}>{op ? '' : fpct(pc(x.wk).pct)}</td>
-                              <td className="n gap">{fv(x.mtd.a, fmt, '1')}</td>
+                              <td className="n gap">{fv(x.mtd.a, fmt === 'flag' ? 'count' : fmt, '1')}</td>
                               <td className="n lock">{op ? '' : fv(x.mtd.t, fmt, '1')}</td>
                               <td className={`n ${pc(x.mtd).cls}`}>{op ? '' : fpct(pc(x.mtd).pct)}</td>
-                              <td className="n gap">{fv(x.ytd.a, fmt, '1')}</td>
+                              <td className="n gap">{fv(x.ytd.a, fmt === 'flag' ? 'count' : fmt, '1')}</td>
                               <td className="n lock">{op ? '' : fv(x.ytd.t, fmt, '1')}</td>
                               <td className={`n ${pc(x.ytd).cls}`}>{op ? '' : fpct(pc(x.ytd).pct)}</td>
                               <td className="n gap lock">{lw != null ? fv(lw, fmt, '1') : ''}</td>

@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { db, tx, plainAll } from '../db.js';
 import { canView, canPrepare, isGlobal, signLong } from '../auth.js';
 import { loadTree } from '../engine.js';
-import { listKeys, getDoc, applyDoc, hashOf, mergeReport, companyOf, PUSHABLE } from './docs.js';
+import { listKeys, getDoc, applyDoc, hashOf, mergeReport, mergeRegister, isRegister, companyOf, PUSHABLE } from './docs.js';
 import { h, bad } from '../routes/util.js';
 
 db.exec(`CREATE TABLE IF NOT EXISTS hub_docs (
@@ -48,7 +48,7 @@ r.get('/sync/pull', h((req) => {
   const tree = loadTree();
   const codeToId = new Map([...tree.byId.values()].map((n) => [n.code, n.id]));
   const rows = plainAll(db.prepare('SELECT type, key, hash, seq FROM hub_docs WHERE seq > ? ORDER BY seq').all(since));
-  const order = { config: 0, node: 1, users: 2, skus: 3, setup: 4, budget: 5, week: 6, month: 7 };
+  const order = { config: 0, node: 1, users: 2, skus: 3, setup: 4, budget: 5, week: 6, month: 7, opps: 8, inits: 9 };
   const nodeDepth = (code) => { let d = 0; for (let n = tree.byId.get(codeToId.get(code)); n?.parent_id; n = tree.byId.get(n.parent_id)) d++; return d; };
   const docs = rows.filter((x) => visible(req.user, tree, x.type, x.key, codeToId))
     .sort((a, b) => (order[a.type] - order[b.type]) || (a.type === 'node' ? nodeDepth(a.key) - nodeDepth(b.key) : a.seq - b.seq))
@@ -73,11 +73,13 @@ r.post('/sync/push', h((req) => {
       const cid = codeToId.get(companyOf(type, key));
       if (!cid) throw new Error('Unknown company');
       const editor = type === 'week' || type === 'month' ? canView(req.user, cid, tree) && req.user.role !== 'executive' : canPrepare(req.user, cid, tree);
+      if (isRegister(type)) { for (const row of payload || []) if (!row.uid) throw new Error('Record without id'); }
       if (!editor) throw new Error('Not permitted');
       const cur = getDoc(type, key);
       const curHash = hashOf(cur);
       let next = payload;
-      if (cur && curHash !== base && (type === 'week' || type === 'month')) {
+      if (isRegister(type)) next = mergeRegister(cur, payload);
+      else if (cur && curHash !== base && (type === 'week' || type === 'month')) {
         const m = mergeReport(cur, payload);
         if (m.reject) { results.push({ type, key, status: 'conflict', hash: curHash, payload: cur }); continue; }
         next = m.doc;

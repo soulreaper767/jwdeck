@@ -65,7 +65,7 @@ export default function Close() {
 
   const inputs = new Set(d.inputs);
   const ed = d.editable;
-  const cols = 10;
+  const cols = 9;
   return (
     <>
       {top}
@@ -81,8 +81,8 @@ export default function Close() {
             <div className="wrap entry">
               <table className="r">
                 <thead>
-                  <tr className="g"><th className="l first" /><th className="gap">Entry</th><th colSpan={4} className="gap">{d.month_label}</th><th colSpan={4} className="gap">YTD · {pv.fy_label}</th></tr>
-                  <tr><th className="l first" style={{ minWidth: 220 }} /><th className="gap" /><th className="gap">Budget</th><th>Actual</th><th>Var</th><th>%</th><th className="gap">Budget</th><th>Actual</th><th>Var</th><th>%</th></tr>
+                  <tr className="g"><th className="l first" /><th colSpan={4} className="gap">{d.month_label}</th><th colSpan={4} className="gap">YTD · {pv.fy_label}</th></tr>
+                  <tr><th className="l first" style={{ minWidth: 220 }} /><th className="gap">Budget</th><th>Actual</th><th>Var</th><th>%</th><th className="gap">Budget</th><th>Actual</th><th>Var</th><th>%</th></tr>
                 </thead>
                 <tbody>
                   {pv.sections.map((sec) => (
@@ -96,11 +96,10 @@ export default function Close() {
                         return (
                           <tr key={x.code} className={x.grand ? 'grand' : x.strong ? 'tot' : ''}>
                             <td className="l first" style={{ paddingLeft: 8 + x.depth * 16 }}>{x.name}</td>
-                            <td className="n gap">{inputs.has(x.code) && (ed
-                              ? <input className="v" value={vals[x.code] ?? ''} onChange={(e) => set(x.code, e.target.value)} onBlur={(e) => { const n = parseNum(e.target.value); if (n != null && !Number.isNaN(n)) setVals((v) => ({ ...v, [x.code]: plainNum(n) })); }} inputMode="decimal" />
-                              : fv(parseNum(vals[x.code]), 'amount', '1'))}</td>
                             <td className="n gap lock">{op ? '' : fv(x.m.b, x.fmt, '1')}</td>
-                            <td className="n">{fv(x.m.a, x.fmt, '1')}</td>
+                            <td className="n">{inputs.has(x.code) && ed
+                              ? <input className="v" value={vals[x.code] ?? ''} onChange={(e) => set(x.code, e.target.value)} onBlur={(e) => { const n = parseNum(e.target.value); if (n != null && !Number.isNaN(n)) setVals((v) => ({ ...v, [x.code]: plainNum(n) })); }} inputMode="decimal" />
+                              : fv(x.m.a, x.fmt === 'flag' ? 'count' : x.fmt, '1')}</td>
                             <td className={`n ${m.cls}`}>{op ? '' : fv(m.d, x.fmt, '1')}</td>
                             <td className={`n ${m.cls}`}>{op ? '' : fpct(m.pct)}</td>
                             <td className="n gap lock">{op ? '' : fv(x.y.b, x.fmt, '1')}</td>

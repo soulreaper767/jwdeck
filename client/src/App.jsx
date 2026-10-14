@@ -16,6 +16,8 @@ import Packs from './pages/Packs.jsx';
 import Users from './pages/Users.jsx';
 import Settings from './pages/Settings.jsx';
 import Audit from './pages/Audit.jsx';
+import Analytics from './pages/Analytics.jsx';
+import { Pipeline, Initiatives } from './pages/Registers.jsx';
 
 export default function App() {
   const { user, booting, logout, isAdmin, inbox, online, sync, syncNow } = useApp();
@@ -37,10 +39,13 @@ export default function App() {
             <NavLink to="/" end>Overview</NavLink>
             <NavLink to="/weekly">Weekly</NavLink>
             <NavLink to="/monthly">Monthly</NavLink>
+            <NavLink to="/analytics">Analytics</NavLink>
             {prep && <NavLink to="/enter">Weekly entry</NavLink>}
             {prep && <NavLink to="/close">Month close</NavLink>}
             <NavLink to="/review">Review{pending ? <span className="badge-n">{pending}</span> : null}</NavLink>
             <NavLink to="/status">Status</NavLink>
+            <NavLink to="/pipeline">Pipeline</NavLink>
+            <NavLink to="/initiatives">Initiatives</NavLink>
             <NavLink to="/budgets">Budgets</NavLink>
             <NavLink to="/companies">Companies</NavLink>
             {isAdmin && <>
@@ -69,6 +74,9 @@ export default function App() {
           <Route path="/close/:cid/:month" element={<Close />} />
           <Route path="/review" element={<Review />} />
           <Route path="/status" element={<Status />} />
+          <Route path="/analytics" element={<Analytics />} />
+          <Route path="/pipeline" element={<Pipeline />} />
+          <Route path="/initiatives" element={<Initiatives />} />
           <Route path="/budgets" element={<Budgets />} />
           <Route path="/companies" element={<Companies />} />
           {isAdmin && <>

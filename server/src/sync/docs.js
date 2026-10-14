@@ -11,8 +11,13 @@ const sortKeys = (v) => {
 };
 export const hashOf = (p) => crypto.createHash('sha1').update(JSON.stringify(sortKeys(p ?? null))).digest('hex');
 
-export const PUSHABLE = new Set(['setup', 'skus', 'budget', 'week', 'month']);
-export const COMPANY_DOCS = new Set(['setup', 'skus', 'budget', 'week', 'month']);
+export const PUSHABLE = new Set(['setup', 'skus', 'budget', 'week', 'month', 'opps', 'inits']);
+export const COMPANY_DOCS = new Set(['setup', 'skus', 'budget', 'week', 'month', 'opps', 'inits']);
+const REG = { opps: 'opportunities', inits: 'initiatives' };
+const REG_COLS = {
+  opps: ['customer', 'title', 'value', 'stage', 'probability', 'created_on', 'expected_close', 'closed_on', 'owner', 'notes', 'updated_at', 'deleted'],
+  inits: ['title', 'owner', 'start_date', 'target_date', 'status', 'progress', 'notes', 'updated_at', 'deleted'],
+};
 
 function maps() {
   const nodes = plainAll(db.prepare('SELECT id, code FROM nodes').all());
@@ -51,6 +56,7 @@ export function listKeys() {
   for (const b of plainAll(db.prepare('SELECT DISTINCT company_id, month_key FROM budget_month').all())) fys.add(`${code.get(b.company_id)}|${P.fyStart(b.month_key, fyStart).slice(0, 4)}`);
   for (const k of fys) out.push({ type: 'budget', key: k });
   for (const r of plainAll(db.prepare('SELECT company_id, week_key FROM reports').all())) out.push({ type: 'week', key: `${code.get(r.company_id)}|${r.week_key}` });
+  for (const [type, table] of Object.entries(REG)) for (const r of plainAll(db.prepare(`SELECT DISTINCT company_id FROM ${table}`).all())) out.push({ type, key: code.get(r.company_id) });
   for (const r of plainAll(db.prepare('SELECT company_id, month_key FROM month_reports').all())) out.push({ type: 'month', key: `${code.get(r.company_id)}|${r.month_key}` });
   return out.filter((x) => x.key && !x.key.startsWith('undefined'));
 }
@@ -84,6 +90,9 @@ export function getDoc(type, key, M = maps()) {
   }
   const cid = M.nodeId.get(companyOf(type, key));
   if (!cid) return null;
+  if (REG[type]) {
+    return plainAll(db.prepare(`SELECT uid, ${REG_COLS[type].join(', ')} FROM ${REG[type]} WHERE company_id = ? ORDER BY uid`).all(cid));
+  }
   if (type === 'setup') {
     const s = db.prepare('SELECT start_week, opening_cash FROM company_setup WHERE company_id = ?').get(cid);
     return s ? { ...s } : null;
@@ -170,6 +179,13 @@ function applyInner(type, key, p) {
   }
   const cid = M.nodeId.get(companyOf(type, key));
   if (!cid) throw new Error(`Unknown company ${companyOf(type, key)}`);
+  if (REG[type]) {
+    const cols = REG_COLS[type];
+    const up = db.prepare(`INSERT INTO ${REG[type]}(uid, company_id, ${cols.join(', ')}) VALUES (?, ?, ${cols.map(() => '?').join(', ')})
+      ON CONFLICT(uid) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(', ')}`);
+    for (const row of p || []) up.run(row.uid, cid, ...cols.map((c) => row[c] ?? null));
+    return;
+  }
   if (type === 'setup') {
     if (!p) db.prepare('DELETE FROM company_setup WHERE company_id = ?').run(cid);
     else db.prepare(`INSERT INTO company_setup(company_id, start_week, opening_cash) VALUES (?,?,?)
@@ -234,7 +250,17 @@ function applyInner(type, key, p) {
   }
 }
 
-// ---------------------------------------------------------------- merge (hub side) for report documents
+// ---------------------------------------------------------------- merge (hub side)
+
+// Registers: union by record id, the most recent edit of each record wins
+export function mergeRegister(cur = [], inc = []) {
+  const m = new Map((cur || []).map((r) => [r.uid, r]));
+  for (const r of inc || []) { const c = m.get(r.uid); if (!c || String(r.updated_at) >= String(c.updated_at)) m.set(r.uid, r); }
+  return [...m.values()].sort((a, b) => (a.uid < b.uid ? -1 : 1));
+}
+export const isRegister = (type) => !!REG[type];
+
+// Report documents
 
 const RANK = { new: 0, draft: 0, reopened: 0, submitted: 1, company_ok: 2, cluster_ok: 3, approved: 4 };
 const LOCKEDS = new Set(['submitted', 'company_ok', 'cluster_ok', 'approved']);

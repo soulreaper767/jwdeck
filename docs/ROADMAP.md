@@ -1,14 +1,19 @@
 # JW Dash roadmap
 
-## Next phase
-- **Analytics.** Performance ranking at company, cluster and group level for any week, month or YTD:
-  - Top and bottom performers against budget and against last period (revenue, recoveries, cash, EBITDA, net profit, orders).
-  - Best and worst SKUs, units and lines.
-  - Biggest movers week-on-week and month-on-month.
-  - Consistency streaks (weeks on or off budget).
-  - Short "what went well / what went wrong" highlights on the dashboard.
+## Done
+- Weekly packs, month close, workflow, cut-off, offline desktop app with sync.
+- Business development lines; pipeline and strategic-initiative registers that fill the weekly figures.
+- Dashboards (cards and charts) for group, cluster and company.
+- Analytics:
+  - top and bottom performers at each level against budget
+  - month profit ranking
+  - SKU leaders and laggards
+  - biggest week-on-week movers
+  - 13-week budget streaks
+  - generated highlights
+- Print / PDF for dashboards and reports, with logo and profile header.
 
-## Later
-- Leads and pipeline detail (customer, stage, probability) behind the weekly totals.
-- Strategic initiatives register (owner, status, milestones) behind the Yes/No flag.
-- Report pack export (PDF) using company profiles and logos.
+## Ideas
+- Scheduled e-mail of the Monday pack to executives.
+- Forecast to year end (run-rate and budget).
+- Excel import for budgets and weekly figures.

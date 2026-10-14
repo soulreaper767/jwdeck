@@ -5,7 +5,7 @@ import {
 import { useApp } from '../store.jsx';
 import { api, qs } from '../lib/api.js';
 import { fv, vr, fpct, UNITS } from '../lib/format.js';
-import { NodeSelect, WeekSelect, UnitSelect, Loading, St, Logo } from '../ui.jsx';
+import { NodeSelect, WeekSelect, UnitSelect, Loading, St, Logo, PrintButton, PrintHeader } from '../ui.jsx';
 import { useView, Crumbs, StatusCounts } from './Weekly.jsx';
 
 // Power BI–style palette
@@ -114,9 +114,12 @@ export default function Overview() {
         <NodeSelect value={view.nodeId} onChange={(id) => setView({ nodeId: id })} />
         <WeekSelect value={view.week} onChange={(wk) => setView({ week: wk, month: null })} />
         <UnitSelect />
+        <span className="sp" />
+        <PrintButton />
       </div>
       {!data ? <Loading /> : (
         <div className="dash">
+          <PrintHeader node={data.node} title="Dashboard" period={`${data.week.label} · ${UNITS[unit].label}`} />
           <Crumbs path={data.path} onPick={(id) => setView({ nodeId: id })} />
           <div className="title">
             <Logo node={data.node} />

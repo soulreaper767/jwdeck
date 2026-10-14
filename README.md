@@ -98,6 +98,19 @@ Only the group reviewer (or an admin) can reopen a report, lapsed or submitted, 
 
 **Budgets:** an annual figure per line. Month-specific amounts go in their month and the rest is spread by days. Weekly, MTD and YTD targets come from that automatically.
 
+**Business development:** the weekly pack also covers new leads (number and value), pipeline, orders confirmed, orders to be confirmed (TBD) and a Yes/No for a new strategic initiative. One click on the weekly entry screen fills these from the Pipeline and Initiatives registers.
+
+**Analytics:** for any level and for the week, MTD or YTD:
+
+- top and bottom performers against budget
+- the last month's profit ranking
+- best and worst SKUs
+- biggest movers on last week
+- 13-week budget streaks
+- highlights of what went well and what needs attention
+
+**Print / PDF:** every report and dashboard prints with the company or group logo and profile in the header.
+
 **Profiles:** group, cluster and company profiles hold the logo, description, nature of business, entity type, start date, registration numbers and contacts.
 
 **Display:** figures are entered in full rupees. Reports show millions by default, with a toggle to full figures, and hovering any figure shows the full amount. The layout works on mobile.

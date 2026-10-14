@@ -1,8 +1,10 @@
 import { Fragment, useState } from 'react';
 import { useApp } from '../store.jsx';
 import { vr, fpct, toCSV, download, UNITS } from '../lib/format.js';
-import { NodeSelect, MonthSelect, UnitSelect, Seg, Loading, Num, St, Logo } from '../ui.jsx';
+import { NodeSelect, MonthSelect, UnitSelect, Seg, Loading, Num, St, Logo, PrintButton, PrintHeader } from '../ui.jsx';
 import { useView, Crumbs, StatusCounts } from './Weekly.jsx';
+
+const emptyMonthRow = (x) => !x.group && [x.m?.a, x.m?.b, x.y?.a, x.y?.b, x.adj, ...(x.cols || [])].every((v) => v == null || v === 0);
 
 export const KEY_MONTH = ['PL_REV', 'PL_GP', 'PL_GP_PCT', 'PL_EBITDA', 'PL_EBITDA_PCT', 'PL_NP', 'CF_NET', 'CF_CLOSE', 'ALL:PQ', 'ALL:SQ'];
 
@@ -38,7 +40,8 @@ function Head({ data, weeks }) {
   );
 }
 
-function Row({ x, unit, weeks, ncols }) {
+function Row({ x: x0, unit, weeks, ncols }) {
+  const x = x0.fmt === 'flag' ? { ...x0, fmt: 'count' } : x0;
   return (
     <tr className={x.grand ? 'grand' : x.strong ? 'tot' : ''}>
       <td className="l first" style={{ paddingLeft: 8 + (x.depth || 0) * 16 }}>{x.name}</td>
@@ -75,10 +78,12 @@ export default function Monthly() {
         <label className="c"><input type="checkbox" checked={weeks} onChange={(e) => setWeeks(e.target.checked)} />Weeks</label>
         <span className="sp" />
         {data && <button onClick={exportCsv}>Export</button>}
+        <PrintButton />
       </div>
       {err && <div className="note err">{err}</div>}
       {!data ? <Loading /> : (
         <>
+          <PrintHeader node={data.node} title="Monthly report" period={`${data.month_label} · ${data.fy_label} · ${UNITS[unit].label}`} />
           <Crumbs path={data.path} onPick={(id) => setView({ nodeId: id })} />
           <div className="title">
             <Logo node={data.node} />
@@ -96,7 +101,7 @@ export default function Monthly() {
                 {data.sections.map((s) => (
                   <Fragment key={s.code}>
                     <tr className="sec"><td colSpan={cols} className="first">{s.name}</td></tr>
-                    {s.rows.map((x, i) => (x.group
+                    {s.rows.filter((x) => !emptyMonthRow(x)).map((x, i) => (x.group
                       ? <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l first">{x.name}</td></tr>
                       : <Row key={x.code} x={x} unit={unit} weeks={weeks} ncols={data.columns.length} />))}
                   </Fragment>
