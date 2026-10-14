@@ -58,20 +58,27 @@ export async function cycle() {
           db.prepare('INSERT INTO sync_conflicts(type, key, local_json) VALUES (?,?,?)').run(r.type, r.key, JSON.stringify(mine?.payload ?? null));
           state.conflicts += 1;
         }
-        if (r.status !== 'ok') applyDoc(r.type, r.key, r.payload);
-        setKnown(r.type, r.key, r.hash);
+        try {
+          if (r.status !== 'ok') applyDoc(r.type, r.key, r.payload);
+          setKnown(r.type, r.key, r.hash);
+        } catch (err) { state.lastError = `${r.type} ${r.key}: ${err.message}`; }
       }
     }
     // 2. pull everything new
     const since = Number(setting('sync_seq') || 0);
     const pulled = await call('GET', `/api/sync/pull?since=${since}`);
-    tx(() => {
-      for (const d of pulled.docs) {
+    let failedSeq = null;
+    for (const d of pulled.docs) {
+      try {
         if (hashOf(getDoc(d.type, d.key)) !== d.hash) applyDoc(d.type, d.key, d.payload);
         setKnown(d.type, d.key, d.hash);
+      } catch (err) {
+        failedSeq = failedSeq == null ? d.seq : Math.min(failedSeq, d.seq);
+        state.lastError = `${d.type} ${d.key}: ${err.message}`;
+        db.prepare('INSERT INTO sync_conflicts(type, key, local_json) VALUES (?,?,?)').run(d.type, d.key, JSON.stringify({ error: err.message }));
       }
-      setSetting('sync_seq', pulled.seq);
-    });
+    }
+    setSetting('sync_seq', failedSeq != null ? Math.max(0, failedSeq - 1) : pulled.seq);
     state.online = true;
     state.lastSync = new Date().toISOString();
     if (!out.length || !state.lastError?.includes(':')) state.lastError = null;

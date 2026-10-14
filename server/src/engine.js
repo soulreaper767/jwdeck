@@ -113,6 +113,39 @@ export class Engine {
     return this.m.byCode.get(item)?.name || item;
   }
 
+  // ---- item behaviour: flow (adds up), balance (latest value, e.g. pipeline) or flag (Yes/No, counted)
+  itemKind(item) {
+    const l = this.m.byCode.get(item);
+    if (l?.fmt === 'flag') return 'flag';
+    if (l?.nature === 'balance') return 'balance';
+    return 'flow';
+  }
+  noFx(item) { return isQty(item) || ['number', 'flag'].includes(this.m.byCode.get(item)?.fmt); }
+  // week value of a balance / flag item: last portion entered, or Yes if any portion says Yes
+  weekStock(d, w, item, kind) {
+    const byM = d?.values?.[item];
+    if (!byM) return null;
+    if (kind === 'flag') return Object.values(byM).some((v) => v > 0) ? 1 : 0;
+    const segs = P.segments(w);
+    for (let i = segs.length - 1; i >= 0; i--) if (byM[segs[i].month] != null) return byM[segs[i].month];
+    return null;
+  }
+  // over the weeks of the given months up to W: latest balance, or number of weeks flagged Yes
+  stockValue(cid, item, kind, months, W, start, rate) {
+    const weeks = [...new Set(months.flatMap((mo) => P.monthWeeks(mo)))].filter((w) => w >= start && w <= W).sort();
+    if (kind === 'flag') {
+      let n = null;
+      for (const w of weeks) { const v = this.weekStock(this.data(cid, w), w, item, kind); if (v != null) n = (n ?? 0) + v; }
+      return n;
+    }
+    for (let i = weeks.length - 1; i >= 0; i--) {
+      const w = weeks[i];
+      const v = this.weekStock(this.data(cid, w), w, item, kind);
+      if (v != null) return v * rate(P.segments(w).at(-1).month);
+    }
+    return null;
+  }
+
   // ---- data
   data(cid, week) {
     const k = `${cid}|${week}`;
@@ -279,7 +312,7 @@ export class Engine {
     const secs = this.sections.filter((s) => !scope || s.scope === scope).map((s) => ({ code: s.code, name: s.name, scope: s.scope, rows: [] }));
     for (const l of this.m.list) {
       const s = secs.find((x) => x.code === l.section);
-      if (s) s.rows.push(mk(l.code, l.name, { fmt: l.fmt, hib: l.hib, depth: depthOf(this.m, l), nature: l.nature, scope: l.scope, strong: ['sum', 'formula', 'cfnet'].includes(l.kind) }));
+      if (s) s.rows.push(mk(l.code, l.name, { fmt: l.fmt === 'flag' && !companyId ? 'count' : l.fmt, hib: l.hib, depth: depthOf(this.m, l), nature: l.nature, scope: l.scope, stock: l.nature === 'balance' || l.fmt === 'flag', strong: ['sum', 'formula', 'cfnet'].includes(l.kind) }));
     }
     const ps = secs.find((s) => s.code === 'PRODSALES');
     if (ps) {
@@ -332,7 +365,7 @@ export class Engine {
     const mseg = segs.find((s) => s.month === M) || segs[segs.length - 1];
     M = mseg.month;
     const rate = (mo) => (translate ? this.fx(c.currency, mo) : 1);
-    const rr = (item, mo) => (isQty(item) ? 1 : rate(mo));
+    const rr = (item, mo) => (this.noFx(item) ? 1 : rate(mo));
     const d = this.data(c.id, W);
     const start = setup.start_week;
     const mweeks = P.monthWeeks(M).filter((w) => w >= start && w <= W);
@@ -343,6 +376,17 @@ export class Engine {
 
     const V = { wkA: {}, wkT: {}, adjW: {}, mtdA: {}, mtdT: {}, ytdA: {}, ytdT: {}, prev: {}, thisWk: {} };
     for (const item of this.items(c.id)) {
+      const kind = this.itemKind(item);
+      if (kind !== 'flow') {
+        const r = (mo) => (this.noFx(item) ? 1 : rate(mo));
+        const wk = this.weekStock(d, W, item, kind);
+        if (wk != null) V.wkA[item] = wk * r(segs.at(-1).month);
+        const m = this.stockValue(c.id, item, kind, [M], W, start, r);
+        if (m != null) V.mtdA[item] = m;
+        const y = this.stockValue(c.id, item, kind, fyMonths, W, start, r);
+        if (y != null) V.ytdA[item] = y;
+        continue;
+      }
       for (const s of segs) {
         V.wkA[item] = addv(V.wkA[item] ?? null, d?.values?.[item]?.[s.month] != null ? d.values[item][s.month] * rr(item, s.month) : null);
         const b = this.budget(c.id, s.month, item);
@@ -401,7 +445,7 @@ export class Engine {
     if (closing.mtd != null) D.mtdA[cc] = closing.mtd;
     if (closing.ytd != null) D.ytdA[cc] = closing.ytd;
     const mk = (code, name, extra = {}) => {
-      const pct = extra.fmt === 'percent';
+      const pct = extra.fmt === 'percent' || extra.fmt === 'flag' || extra.nature === 'balance' || (extra.fmt === 'number' && extra.stock);
       const opening = extra.nature === 'opening';
       const prev = D.prev[code] ?? null;
       const tw = D.thisWk[code] ?? null;
@@ -457,7 +501,7 @@ export class Engine {
     const start = setup.start_week;
     if (P.monthWeeks(M).every((w) => w < start)) return null;
     const rate = (mo) => (translate ? this.fx(c.currency, mo) : 1);
-    const rr = (item, mo) => (isQty(item) ? 1 : rate(mo));
+    const rr = (item, mo) => (this.noFx(item) ? 1 : rate(mo));
     const allW = P.monthWeeks(M).filter((w) => w >= start);
     const dataW = allW.filter((w) => w <= upto && this.data(c.id, w));
     const lastEnd = dataW.length ? P.segments(dataW[dataW.length - 1]).find((s) => s.month === M).end : null;
@@ -469,6 +513,18 @@ export class Engine {
     const C = cols.map(() => ({}));
     const put = (vec, k, v) => { if (v != null) vec[k] = addv(vec[k] ?? null, v); };
     for (const item of this.items(c.id)) {
+      const kind = this.itemKind(item);
+      if (kind !== 'flow') {
+        const r = (mo) => (this.noFx(item) ? 1 : rate(mo));
+        put(V.mA, item, this.stockValue(c.id, item, kind, [M], upto, start, r));
+        put(V.yA, item, this.stockValue(c.id, item, kind, fyMonths, upto, start, r));
+        cols.forEach(({ week }, i) => {
+          if (week < start) return;
+          const v = this.data(c.id, week)?.values?.[item]?.[M];
+          if (v != null) C[i][item] = v * r(M);
+        });
+        continue;
+      }
       const ma = this.monthActual(c.id, M, upto, item, start);
       put(V.mA, item, ma != null ? ma * rr(item, M) : null);
       const b = this.budget(c.id, M, item);

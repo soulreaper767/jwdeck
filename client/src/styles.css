@@ -85,7 +85,8 @@ table.r tr.kid td { background: var(--paper-2); font-size: 14px; }
 table.r tr.click { cursor: pointer; }
 table.r tr.click:hover td { background: var(--hi); }
 table.r tr.flag td { background: var(--mark); }
-table.r td.lock { color: var(--ink-2); }
+table.r td.lock { color: #4a4a4a; background: #f4f5f7; font-style: italic; }
+table.r tr.tot td.lock, table.r tr.grand td.lock { background: #eceef2; }
 table.r td.first, table.r th.first { position: sticky; left: 0; background: var(--paper); z-index: 1; }
 table.r tr.kid td.first { background: var(--paper-2); }
 .diff { font-weight: bold; color: var(--amber); }
@@ -175,4 +176,47 @@ h2.part { margin: 26px 0 6px; font-size: 21px; border-bottom: 1px solid var(--ru
   .entry input.v { width: 104px; }
   .toast { left: 12px; right: 12px; max-width: none; }
   .hide-m { display: none !important; }
+}
+
+/* ---------- dashboard (cards & charts) */
+.dash { background: #f5f6f8; margin: -18px -24px -70px; padding: 18px 24px 70px; min-height: 100vh; }
+.legend-line { display: flex; gap: 16px; flex-wrap: wrap; font-size: 13px; color: #444; margin: 2px 0 6px; }
+.legend-line i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.kgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 14px; }
+.kc, .cc, .uc {
+  background: #fff; border: 1px solid #dcdde1; border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 3px 10px rgba(0, 0, 0, .05);
+}
+.kc { padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 5px; position: relative; overflow: hidden; }
+.kc::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: #12239E; }
+.kc-t { font-size: 13px; color: #605E5C; letter-spacing: .2px; }
+.kc-v { font-size: 30px; line-height: 1.1; font-variant-numeric: tabular-nums; color: #252423; }
+.kc-row { display: flex; align-items: center; gap: 7px; font-size: 13.5px; color: #333; }
+.tag-b { font-size: 10.5px; text-transform: uppercase; letter-spacing: .6px; padding: 1px 6px; border-radius: 3px; background: #fdeee6; color: #b24d1d; border: 1px solid #f3c7b0; }
+.chip { font-size: 12.5px; font-weight: bold; padding: 1px 7px; border-radius: 10px; background: #eef0f3; color: #555; white-space: nowrap; }
+.chip.good { background: #e3f4e8; color: #11742e; }
+.chip.bad { background: #fbe6e8; color: #b42536; }
+.kc-bar { position: relative; height: 6px; background: #eceef2; border-radius: 3px; margin-top: 2px; }
+.kc-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; }
+.kc-bar b { position: absolute; top: -3px; bottom: -3px; width: 2px; background: #E66C37; }
+.kc-foot { font-size: 12.5px; color: #605E5C; }
+.kc-spark { height: 34px; margin: 2px -14px -10px; }
+.cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 14px; margin-top: 22px; }
+.cc { padding: 12px 14px 8px; }
+.cc-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.cc-t { font-size: 16px; font-weight: bold; color: #252423; }
+.cc-s { font-size: 12.5px; color: #605E5C; }
+.ugrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.uc { padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; transition: box-shadow .15s, border-color .15s; }
+.uc:hover { border-color: #12239E; box-shadow: 0 2px 4px rgba(0, 0, 0, .08), 0 8px 18px rgba(18, 35, 158, .10); }
+.uc-h { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.uc-v { font-size: 24px; }
+.uc-m { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 12px; font-size: 13px; color: #555; border-top: 1px solid #eee; padding-top: 6px; }
+.uc-m b { color: #252423; font-weight: normal; float: right; }
+.dash h2.part { border-bottom: 0; margin-top: 22px; }
+@media (max-width: 760px) {
+  .dash { margin: -12px -12px -70px; padding: 12px 12px 70px; }
+  .cgrid { grid-template-columns: 1fr; }
+  .kgrid { grid-template-columns: 1fr 1fr; gap: 10px; }
+  .kc-v { font-size: 22px; }
 }

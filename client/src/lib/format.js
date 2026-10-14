@@ -6,6 +6,8 @@ const nf = (d) => new Intl.NumberFormat('en-US', { minimumFractionDigits: d, max
 export function fv(v, fmt = 'amount', unit = 'm') {
   if (v == null || Number.isNaN(v)) return '';
   if (fmt === 'percent') return `${nf(1).format(v)}%`;
+  if (fmt === 'flag') return v > 0 ? 'Yes' : 'No';
+  if (fmt === 'number' || fmt === 'count') return nf(0).format(v);
   if (fmt === 'qty') { const s = nf(Math.abs(v) < 100 && v % 1 ? 1 : 0).format(Math.abs(v)); return v < 0 ? `(${s})` : s; }
   const u = UNITS[unit] || UNITS.m;
   const s = nf(u.dp).format(Math.abs(v / u.div));

@@ -44,8 +44,8 @@ CREATE TABLE IF NOT EXISTS lines (
   scope         TEXT NOT NULL DEFAULT 'week' CHECK (scope IN ('week','month')),
   cf            TEXT,
   formula       TEXT,
-  nature        TEXT NOT NULL DEFAULT 'flow' CHECK (nature IN ('flow','opening','closing')),
-  fmt           TEXT NOT NULL DEFAULT 'amount' CHECK (fmt IN ('amount','percent')),
+  nature        TEXT NOT NULL DEFAULT 'flow' CHECK (nature IN ('flow','opening','closing','balance')),
+  fmt           TEXT NOT NULL DEFAULT 'amount' CHECK (fmt IN ('amount','percent','number','flag')),
   hib           INTEGER NOT NULL DEFAULT 1,
   budget        INTEGER NOT NULL DEFAULT 0,
   note_required INTEGER NOT NULL DEFAULT 0,
@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS filings (
   company_id INTEGER NOT NULL REFERENCES nodes(id),
   week_key   TEXT NOT NULL,
   revision   INTEGER NOT NULL,
+  uid        TEXT DEFAULT (lower(hex(randomblob(16)))),
   currency   TEXT NOT NULL,
   data_json  TEXT NOT NULL,
   filed_by   INTEGER,
@@ -164,6 +165,7 @@ CREATE TABLE IF NOT EXISTS month_filings (
   company_id INTEGER NOT NULL REFERENCES nodes(id),
   month_key  TEXT NOT NULL,
   revision   INTEGER NOT NULL,
+  uid        TEXT DEFAULT (lower(hex(randomblob(16)))),
   data_json  TEXT NOT NULL,
   filed_by   INTEGER,
   filed_by_email TEXT,
@@ -173,6 +175,7 @@ CREATE TABLE IF NOT EXISTS month_filings (
 
 CREATE TABLE IF NOT EXISTS workflow_log (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  uid         TEXT DEFAULT (lower(hex(randomblob(16)))),
   kind        TEXT NOT NULL CHECK (kind IN ('week','month')),
   company_id  INTEGER NOT NULL,
   period      TEXT NOT NULL,
@@ -222,6 +225,24 @@ CREATE TABLE IF NOT EXISTS audit (
   at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 `);
+
+// ---- migrations: add columns that older databases lack, and give every synced record a unique id
+function ensureColumn(table, col, def) {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+for (const [t, c, d] of [
+  ['reports', 'reopened', 'INTEGER NOT NULL DEFAULT 0'], ['month_reports', 'reopened', 'INTEGER NOT NULL DEFAULT 0'],
+  ['workflow_log', 'user_email', 'TEXT'], ['workflow_log', 'user_name', 'TEXT'], ['workflow_log', 'uid', 'TEXT'],
+  ['filings', 'filed_by_email', 'TEXT'], ['filings', 'uid', 'TEXT'],
+  ['month_filings', 'filed_by_email', 'TEXT'], ['month_filings', 'uid', 'TEXT'],
+]) ensureColumn(t, c, d);
+for (const t of ['filings', 'month_filings', 'workflow_log']) {
+  db.exec(`UPDATE ${t} SET uid = lower(hex(randomblob(16))) WHERE uid IS NULL;
+    CREATE TRIGGER IF NOT EXISTS t_${t}_uid AFTER INSERT ON ${t} WHEN NEW.uid IS NULL
+    BEGIN UPDATE ${t} SET uid = lower(hex(randomblob(16))) WHERE id = NEW.id; END;
+    CREATE UNIQUE INDEX IF NOT EXISTS ux_${t}_uid ON ${t}(uid);`);
+}
 
 const DEFAULT_SETTINGS = {
   group_name: 'JW Group',

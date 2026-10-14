@@ -61,7 +61,7 @@ export const companyOf = (type, key) => (COMPANY_DOCS.has(type) ? key.split('|')
 
 function logOut(M, kind, cid, period) {
   return plainAll(db.prepare('SELECT * FROM workflow_log WHERE kind = ? AND company_id = ? AND period = ? ORDER BY id').all(kind, cid, period))
-    .map((l) => ({ action: l.action, from: l.from_status, to: l.to_status, user: M.userEmail.get(l.user_id) || l.user_email || null, name: l.user_name || null, comment: l.comment, at: l.at }));
+    .map((l) => ({ uid: l.uid, action: l.action, from: l.from_status, to: l.to_status, user: M.userEmail.get(l.user_id) || l.user_email || null, name: l.user_name || null, comment: l.comment, at: l.at }));
 }
 
 export function getDoc(type, key, M = maps()) {
@@ -119,7 +119,7 @@ export function getDoc(type, key, M = maps()) {
       for (const v of plainAll(db.prepare('SELECT * FROM month_values WHERE report_id = ?').all(r.id))) if (v.value != null) data.values[v.item] = v.value;
     }
     const filings = plainAll(db.prepare(`SELECT * FROM ${ft} WHERE company_id = ? AND ${kc} = ? ORDER BY revision`).all(cid, period))
-      .map((x) => ({ revision: x.revision, currency: x.currency || null, data: type === 'week' ? mapData(JSON.parse(x.data_json), f) : JSON.parse(x.data_json), by: M.userEmail.get(x.filed_by) || x.filed_by_email || null, at: x.filed_at }));
+      .map((x) => ({ uid: x.uid, revision: x.revision, currency: x.currency || null, data: type === 'week' ? mapData(JSON.parse(x.data_json), f) : JSON.parse(x.data_json), by: M.userEmail.get(x.filed_by) || x.filed_by_email || null, at: x.filed_at }));
     return { status: r.status, revision: r.revision, reopened: r.reopened, remarks: r.remarks || '', data, filings, log: logOut(M, type, cid, period) };
   }
   return null;
@@ -213,45 +213,61 @@ function applyInner(type, key, p) {
       for (const [k, v] of Object.entries(p.data?.values || {})) db.prepare('INSERT INTO month_values(report_id, item, value) VALUES (?,?,?)').run(r.id, k, v);
     }
     db.prepare(`DELETE FROM ${ft} WHERE company_id = ? AND ${kc} = ?`).run(cid, period);
-    for (const x of p.filings || []) {
+    for (const x of renumber(p.filings || [])) {
       const data = type === 'week' ? mapData(x.data, f) : x.data;
       if (type === 'week') {
-        db.prepare('INSERT INTO filings(report_id, company_id, week_key, revision, currency, data_json, filed_by, filed_by_email, filed_at) VALUES (?,?,?,?,?,?,?,?,?)')
-          .run(r.id, cid, period, x.revision, x.currency || 'PKR', JSON.stringify(data), M.userId.get(x.by) ?? null, x.by, x.at);
+        db.prepare('INSERT INTO filings(uid, report_id, company_id, week_key, revision, currency, data_json, filed_by, filed_by_email, filed_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+          .run(x.uid || null, r.id, cid, period, x.revision, x.currency || 'PKR', JSON.stringify(data), M.userId.get(x.by) ?? null, x.by, x.at);
       } else {
-        db.prepare('INSERT INTO month_filings(report_id, company_id, month_key, revision, data_json, filed_by, filed_by_email, filed_at) VALUES (?,?,?,?,?,?,?,?)')
-          .run(r.id, cid, period, x.revision, JSON.stringify(data), M.userId.get(x.by) ?? null, x.by, x.at);
+        db.prepare('INSERT INTO month_filings(uid, report_id, company_id, month_key, revision, data_json, filed_by, filed_by_email, filed_at) VALUES (?,?,?,?,?,?,?,?,?)')
+          .run(x.uid || null, r.id, cid, period, x.revision, JSON.stringify(data), M.userId.get(x.by) ?? null, x.by, x.at);
       }
     }
     db.prepare('DELETE FROM workflow_log WHERE kind = ? AND company_id = ? AND period = ?').run(type, cid, period);
-    for (const l of p.log || []) {
-      db.prepare('INSERT INTO workflow_log(kind, company_id, period, action, from_status, to_status, user_id, user_email, user_name, comment, at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-        .run(type, cid, period, l.action, l.from, l.to, M.userId.get(l.user) ?? null, l.user, l.name ?? null, l.comment, l.at);
+    for (const l of dedupeLog(p.log || [])) {
+      db.prepare('INSERT INTO workflow_log(uid, kind, company_id, period, action, from_status, to_status, user_id, user_email, user_name, comment, at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(l.uid || null, type, cid, period, l.action, l.from, l.to, M.userId.get(l.user) ?? null, l.user, l.name ?? null, l.comment, l.at);
     }
+    // the report's revision follows its newest filing
+    const top = db.prepare(`SELECT MAX(revision) r FROM ${ft} WHERE company_id = ? AND ${kc} = ?`).get(cid, period).r;
+    if (top != null && top !== p.revision) db.prepare(`UPDATE ${rt} SET revision = ? WHERE id = ?`).run(top, r.id);
   }
 }
 
 // ---------------------------------------------------------------- merge (hub side) for report documents
 
 const RANK = { new: 0, draft: 0, reopened: 0, submitted: 1, company_ok: 2, cluster_ok: 3, approved: 4 };
+const LOCKEDS = new Set(['submitted', 'company_ok', 'cluster_ok', 'approved']);
 const EDITING = new Set(['new', 'draft', 'reopened']);
-const unionLog = (a = [], b = []) => {
+const logKey = (l) => l.uid || `${l.action}|${l.at}|${l.user}`;
+const filingKey = (f) => f.uid || `${f.revision}|${f.at}`;
+const byTime = (x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0);
+export function dedupeLog(list) {
   const seen = new Set();
-  return [...a, ...b].filter((l) => { const k = `${l.action}|${l.at}|${l.user}`; if (seen.has(k)) return false; seen.add(k); return true; })
-    .sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0));
-};
-const unionFilings = (a = [], b = []) => {
+  return list.filter((l) => { const k = logKey(l); if (seen.has(k)) return false; seen.add(k); return true; }).sort(byTime);
+}
+// one entry per unique filing; revisions renumbered 1..n in filing order so they can never clash
+export function renumber(list) {
   const m = new Map();
-  for (const f of [...a, ...b]) m.set(f.revision, f);
-  return [...m.values()].sort((x, y) => x.revision - y.revision);
-};
+  for (const f of list) if (!m.has(filingKey(f))) m.set(filingKey(f), f);
+  return [...m.values()].sort((x, y) => (x.revision - y.revision) || byTime(x, y)).map((f, i) => ({ ...f, revision: i + 1 }));
+}
+const unionLog = (a = [], b = []) => dedupeLog([...a, ...b]);
+const unionFilings = (a = [], b = []) => renumber([...a, ...b].sort(byTime));
 
 // Returns { doc } to store, or { reject: true } when the hub's version must win
 export function mergeReport(cur, inc) {
-  if (!cur) return { doc: inc };
+  if (!cur) return { doc: { ...inc, filings: renumber(inc.filings || []), log: dedupeLog(inc.log || []) } };
   const log = unionLog(cur.log, inc.log);
   const filings = unionFilings(cur.filings, inc.filings);
   const reopened = Math.max(cur.reopened || 0, inc.reopened || 0);
+  const known = new Set((cur.filings || []).map(filingKey));
+  const fresh = (inc.filings || []).filter((f) => !known.has(filingKey(f)));
+  if (fresh.length) {
+    // a submission the hub has not seen: keep every version, the newest becomes current and goes through review again
+    const revision = filings.length ? filings[filings.length - 1].revision : inc.revision;
+    return { doc: { ...inc, status: LOCKEDS.has(inc.status) ? inc.status : 'submitted', revision, log, filings, reopened } };
+  }
   if (inc.revision > cur.revision) {
     // a newer submission made offline: accept it unless the hub has since reopened that very submission
     return { doc: { ...inc, log, filings, reopened } };

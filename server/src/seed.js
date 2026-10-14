@@ -35,6 +35,7 @@ tx(() => {
   sec.run('REVREC', 'Revenue & Recoveries', 'week', 3);
   sec.run('PRODSALES', 'Production & Sales', 'week', 4);
   sec.run('CASH', 'Payments & Cash Position', 'week', 5);
+  sec.run('BD', 'Business Development', 'week', 6);
 
   const ins = db.prepare(`INSERT INTO lines(code, name, section, kind, scope, cf, formula, nature, fmt, hib, budget, note_required, is_kpi, system, sort)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?)`);
@@ -85,6 +86,13 @@ tx(() => {
     ['NETCF', 'Net cash flow', 'CASH', null, 'formula', 'REC_TOT - PAY_TOT', W, {}],
     ['CB_OTHER', 'Other movements', 'CASH', null, 'input', null, W, { note: 1 }],
     ['CB_CLOSE', 'Closing cash & bank', 'CASH', null, 'formula', 'CB_OPEN + NETCF + CB_OTHER', W, { nature: 'closing', kpi: 1 }],
+
+    ['BD_LEADS', 'New leads (number)', 'BD', null, 'input', null, W, { fmt: 'number', budget: 1 }],
+    ['BD_LEADS_V', 'New leads (value)', 'BD', null, 'input', null, W, { budget: 1 }],
+    ['BD_PIPE', 'Pipeline (open, at week end)', 'BD', null, 'input', null, W, { nature: 'balance' }],
+    ['BD_CONF', 'Orders confirmed', 'BD', null, 'input', null, W, { budget: 1, kpi: 1 }],
+    ['BD_TBD', 'Orders to be confirmed (TBD)', 'BD', null, 'input', null, W, { nature: 'balance' }],
+    ['BD_INIT', 'New strategic initiative', 'BD', null, 'input', null, W, { fmt: 'flag', note: 1 }],
   ];
   L.forEach(([code, name, section, , kind, formula, scope, o], i) => {
     lid[code] = Number(ins.run(code, name, section, kind, scope, o.cf || null, formula, o.nature || 'flow', o.fmt || 'amount', o.hib ?? 1, o.budget || 0, o.note || 0, o.kpi || 0, (i + 1) * 10).lastInsertRowid);
@@ -159,6 +167,9 @@ tx(() => {
       bA.run(cid, fy, 'PAY_FIN', Math.round(net * 0.04));
       bA.run(cid, fy, 'PL_COGS', Math.round(net * (1 - p.gm)));
       for (const [k, r] of Object.entries(PL)) bA.run(cid, fy, k, Math.round(net * r));
+      bA.run(cid, fy, 'BD_LEADS', Math.round(365 / 7 * 6 * up));
+      bA.run(cid, fy, 'BD_LEADS_V', Math.round(net * 0.25));
+      bA.run(cid, fy, 'BD_CONF', Math.round(net * 0.12));
       if (fy === 2026) {
         bA.run(cid, fy, 'PAY_INV', Math.round(net * 0.05));
         bM.run(cid, '2026-09', 'PAY_INV', Math.round(net * 0.02));
@@ -234,8 +245,20 @@ tx(() => {
         if (wi % 11 === 6) put('REC_INV', s.month, k(net * 0.03));
         if (code === 'RJB' && wi === 5) put('REC_FIN', s.month, 25e6);
       }
+      {
+        const last = P.segments(w).at(-1).month;
+        const weekNet = Object.entries(values.REC_OPS || {}).reduce((t, [, v]) => t + v, 0);
+        const k = (x) => Math.round(x / 1000) * 1000;
+        put('BD_LEADS', last, Math.max(0, Math.round(6 * jitter(0.6))));
+        put('BD_LEADS_V', last, k(weekNet * 0.25 * jitter(0.5)));
+        put('BD_PIPE', last, k(weekNet * 2.2 * jitter(0.15)));
+        put('BD_CONF', last, k(weekNet * 0.12 * jitter(0.4)));
+        put('BD_TBD', last, k(weekNet * 0.5 * jitter(0.3)));
+        put('BD_INIT', last, wi % 6 === 2 ? 1 : 0);
+      }
       const adj = {};
       const notes = {};
+      if (values.BD_INIT && Object.values(values.BD_INIT).some((v) => v)) notes.BD_INIT = ['Distribution tie-up in Southern Punjab', 'New export market study (GCC)', 'Solar power for plant', 'Cold-chain expansion', 'Key-account program'][wi % 5];
       const a = ADJ[`${code}|${w}`];
       if (a) adj[a[0] === 'SV0' ? `SKU:${p.skuIds[0]}:SV` : a[0]] = { value: a[1], reason: a[2] };
       if (code === 'RJF' && w === '2026-W35') { values.CB_OTHER = { [P.segments(w)[0].month]: -500000 }; notes.CB_OTHER = 'Bank charges & withholding on profit, per statement'; }

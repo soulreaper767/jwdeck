@@ -55,7 +55,7 @@ r.get('/sync/pull', h((req) => {
     .map((x) => {
       let payload = getDoc(x.type, x.key);
       if (x.type === 'users') payload = usersFor(req.user, tree, payload);
-      return { type: x.type, key: x.key, hash: x.type === 'users' ? hashOf(payload) : x.hash, payload };
+      return { type: x.type, key: x.key, seq: x.seq, hash: x.type === 'users' ? hashOf(payload) : x.hash, payload };
     });
   return { seq, docs };
 }));

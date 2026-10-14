@@ -140,7 +140,7 @@ r.get('/budgets/:id', h((req) => {
   const items = eng.budgetItems(c.id).map((k) => {
     const sku = /^SKU:\d+:(PQ|SQ|SV)$/.exec(k);
     const line = eng.m.byCode.get(k);
-    return { key: k, label: eng.itemLabel(k), qty: !!sku && sku[1] !== 'SV', section: line ? line.section : 'PRODSALES', scope: line ? line.scope : 'week' };
+    return { key: k, label: eng.itemLabel(k), qty: (!!sku && sku[1] !== 'SV') || line?.fmt === 'number', section: line ? line.section : 'PRODSALES', scope: line ? line.scope : 'week' };
   });
   const annual = {};
   for (const b of plainAll(db.prepare('SELECT * FROM budget_annual WHERE company_id = ? AND fy = ?').all(c.id, fy))) annual[b.item] = b.value;

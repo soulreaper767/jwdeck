@@ -203,10 +203,12 @@ export default function Entry() {
                       {sec.rows.map((x, i) => {
                         if (x.group) return <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l first">{x.name}</td></tr>;
                         const inp = isInput(x.code) && !x.strong;
+                        const stock = x.stock;
+                        const lastSeg = segs[segs.length - 1].month;
                         const fmt = x.fmt;
                         const op = x.nature === 'opening';
                         const pc = (p) => vr(p.a, p.t, x.hib, fmt);
-                        const showAdj = openAdj.has(x.code) || (s.adj[x.code] && s.adj[x.code].value) || (noteCodes.has(x.code) && segs.some((g) => parseNum(s.values[x.code]?.[g.month])));
+                        const showAdj = openAdj.has(x.code) || (s.adj[x.code] && s.adj[x.code].value) || (noteCodes.has(x.code) && segs.some((g) => parseNum(s.values[x.code]?.[g.month]) > 0));
                         const lw = d.last_week?.values?.[x.code];
                         return (
                           <Fragment key={x.code}>
@@ -214,7 +216,11 @@ export default function Entry() {
                               <td className="l first" style={{ paddingLeft: 8 + x.depth * 16 }}>{x.name}</td>
                               {segs.map((g, j) => (
                                 <td key={g.month} className={`n ${j === 0 ? 'gap' : ''}`}>
-                                  {inp && ed ? (
+                                  {inp && stock && g.month !== lastSeg ? '' : inp && ed && fmt === 'flag' ? (
+                                    <select value={s.values[x.code]?.[g.month] ?? ''} onChange={(e) => change((st) => { (st.values[x.code] ||= {})[g.month] = e.target.value; return st; })}>
+                                      <option value="" /><option value="1">Yes</option><option value="0">No</option>
+                                    </select>
+                                  ) : inp && ed ? (
                                     <input className={`v ${Number.isNaN(parseNum(s.values[x.code]?.[g.month])) ? 'bad' : ''}`}
                                       ref={(el) => { refs.current[`${x.code}|${g.month}`] = el; }}
                                       value={s.values[x.code]?.[g.month] ?? ''}
@@ -234,7 +240,7 @@ export default function Entry() {
                               <td className="n lock">{op ? '' : fv(x.ytd.t, fmt, '1')}</td>
                               <td className={`n ${pc(x.ytd).cls}`}>{op ? '' : fpct(pc(x.ytd).pct)}</td>
                               <td className="n gap lock">{lw != null ? fv(lw, fmt, '1') : ''}</td>
-                              <td>{inp && ed && <button className="link small" onClick={() => setOpenAdj((o) => { const n = new Set(o); n.has(x.code) ? n.delete(x.code) : n.add(x.code); return n; })}>adj</button>}</td>
+                              <td>{inp && ed && !stock && <button className="link small" onClick={() => setOpenAdj((o) => { const n = new Set(o); n.has(x.code) ? n.delete(x.code) : n.add(x.code); return n; })}>adj</button>}</td>
                             </tr>
                             {inp && showAdj && (
                               <tr className="adj">

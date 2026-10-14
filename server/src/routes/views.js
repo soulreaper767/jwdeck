@@ -54,6 +54,24 @@ r.get('/view/trend', h((req) => {
   return { points };
 }));
 
+// Month-by-month key results (actual and budget) for charts
+r.get('/view/month-trend', h((req) => {
+  const { eng, nodeId } = ctx(req);
+  const n = Math.min(Math.max(Number(req.query.n) || 6, 2), 12);
+  const last = P.shiftMonth(P.monthOfDate(new Date()), -1);
+  const codes = String(req.query.codes || 'PL_REV,PL_GP,PL_EBITDA,PL_NP,CF_CLOSE,REV_NET').split(',');
+  const upto = P.lastClosedWeek();
+  const points = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const M = P.shiftMonth(last, -i);
+    const v = eng.monthView(nodeId, M, upto, { children: false });
+    const row = { month: M, label: P.monthLabel(M).slice(0, 3) };
+    for (const sec of v.sections) for (const x of sec.rows) if (codes.includes(x.code)) { row[x.code] = x.m.a; row[`${x.code}_B`] = x.m.b; }
+    points.push(row);
+  }
+  return { points };
+}));
+
 // Workflow status grid: companies × weeks or months
 r.get('/view/status', h((req) => {
   const { eng, nodeId, W } = ctx(req);
