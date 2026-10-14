@@ -114,3 +114,19 @@ Only the group reviewer (or an admin) can reopen a report, lapsed or submitted, 
 **Profiles:** group, cluster and company profiles hold the logo, description, nature of business, entity type, start date, registration numbers and contacts.
 
 **Display:** figures are entered in full rupees. Reports show millions by default, with a toggle to full figures, and hovering any figure shows the full amount. The layout works on mobile.
+
+## Server install (VPS)
+
+Runs beside anything else on the server (e.g. Frappe): own user `jwdeck`, own Node in `/home/jwdeck/node`, own service `jwdeck`, own port (default 8095). No nginx or system packages are changed.
+
+```bash
+# as root, first time
+curl -fsSL https://raw.githubusercontent.com/soulreaper767/jwdeck/main/deploy/install.sh | bash
+# options: PORT=8095  DEMO=1 (load demo data instead of a clean start)
+
+# later updates (keeps data, takes a backup first)
+bash /home/jwdeck/jwdeck/deploy/update.sh
+```
+
+Open `http://<server-ip>:8095`. Data: `/home/jwdeck/data/jw_dash.db`. Logs: `journalctl -u jwdeck -f`.
+Desktop installs connect to the same address as their hub.
