@@ -503,7 +503,7 @@ export class Engine {
 
   // ================================================================ MONTH
 
-  companyMonth(c, M, upto, cols, translate) {
+  companyMonth(c, M, upto, cols, translate, ytd = true) {
     const setup = this.setup.get(c.id);
     if (!setup) return null;
     const start = setup.start_week;
@@ -525,7 +525,7 @@ export class Engine {
       if (kind !== 'flow') {
         const r = (mo) => (this.noFx(item) ? 1 : rate(mo));
         put(V.mA, item, this.stockValue(c.id, item, kind, [M], upto, start, r));
-        put(V.yA, item, this.stockValue(c.id, item, kind, fyMonths, upto, start, r));
+        if (ytd) put(V.yA, item, this.stockValue(c.id, item, kind, fyMonths, upto, start, r));
         cols.forEach(({ week }, i) => {
           if (week < start) return;
           const v = this.data(c.id, week)?.values?.[item]?.[M];
@@ -539,7 +539,7 @@ export class Engine {
       put(V.mB, item, b != null ? b * frac * rr(item, M) : null);
       put(V.yA, item, V.mA[item]);
       put(V.yB, item, V.mB[item]);
-      for (const mo of fyMonths) {
+      for (const mo of ytd ? fyMonths : []) {
         if (mo >= M) continue;
         const a = this.monthActual(c.id, mo, upto, item, start);
         put(V.yA, item, a != null ? a * rr(item, mo) : null);
@@ -566,7 +566,7 @@ export class Engine {
       put(V.mB, item, b != null ? b * rate(M) : null);
       put(V.yA, item, V.mA[item]);
       put(V.yB, item, V.mB[item]);
-      for (const mo of fyMonths) {
+      for (const mo of ytd ? fyMonths : []) {
         if (mo >= M || !hasM(mo)) continue;
         const a = this.mdata(c.id, mo)?.values?.[item];
         put(V.yA, item, a != null ? a * rate(mo) : null);
@@ -591,7 +591,7 @@ export class Engine {
         this.addSkuTotal(v);
         return v;
       };
-      for (const mo of fyMonths) {
+      for (const mo of ytd ? fyMonths : [M]) {
         if (mo > M || !this.mdata(c.id, mo)) continue;
         put(V.yA, l.code, mo === M ? src(V.mA) : src(monthVec(mo)));
         put(V.yB, l.code, src(budVec(mo)));
@@ -600,7 +600,7 @@ export class Engine {
     }
     const oc = this.m.openingCode;
     const mOpen = this.firstOpen(c.id, M, start, upto);
-    const fyOpen = fyMonths.map((mo) => this.firstOpen(c.id, mo, start, upto)).find((x) => x != null);
+    const fyOpen = ytd ? fyMonths.map((mo) => this.firstOpen(c.id, mo, start, upto)).find((x) => x != null) : null;
     if (mOpen != null) V.mA[oc] = V.mB[oc] = mOpen * rate(M);
     if (fyOpen != null) V.yA[oc] = V.yB[oc] = fyOpen * rate(fyMonths[0]);
     const ch = this.chain(c.id);
@@ -611,6 +611,134 @@ export class Engine {
       colOpen: colOpen.map((x) => (x == null ? null : x * rate(M))),
       colClose: colClose.map((x) => (x == null ? null : x * rate(M))),
     };
+  }
+
+  // ================================================================ PERIOD (month / quarter / year, to date)
+
+  // Resolve a period request into months, cut-off week and the comparative span
+  periodSpec({ mode, month, fy, q, cmp } = {}) {
+    const s = this.fyStartMonth;
+    const curM = P.monthOfDate(new Date());
+    const upto = P.lastClosedWeek();
+    const thru = P.weekEnd(upto);
+    const fyNow = fyOf(curM, s);
+    const F = Number(fy) || fyNow;
+    const fyL = (y) => P.fyLabel(`${y}-${String(s).padStart(2, '0')}`, s);
+    let all;
+    let label;
+    let step;
+    let cmpLabel;
+    if (mode === 'month') {
+      const m = P.isMonth(month) ? month : P.shiftMonth(curM, -1);
+      all = [m];
+      label = P.monthLabel(m);
+      step = cmp === 'ly' ? 12 : 1;
+      cmpLabel = P.monthLabel(P.shiftMonth(m, -step));
+    } else if (mode === 'quarter') {
+      const qNow = Math.floor(P.fyMonths(curM, s).length - 1) / 3;
+      const Q = Math.min(4, Math.max(1, Number(q) || (F === fyNow ? Math.floor(qNow) + 1 : 4)));
+      all = P.fyAllMonths(F, s).slice((Q - 1) * 3, Q * 3);
+      label = `Q${Q} ${fyL(F)}`;
+      step = cmp === 'ly' ? 12 : 3;
+      cmpLabel = cmp === 'ly' ? `Q${Q} ${fyL(F - 1)}` : Q === 1 ? `Q4 ${fyL(F - 1)}` : `Q${Q - 1} ${fyL(F)}`;
+    } else {
+      all = P.fyAllMonths(F, s);
+      label = fyL(F);
+      step = 12;
+      cmpLabel = fyL(F - 1);
+    }
+    const months = all.filter((m) => m <= curM);
+    const partial = all[all.length - 1] >= curM;
+    const back = (d, n) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - n, Math.min(d.getUTCDate(), 28)));
+    const tag = mode === 'month' ? 'MTD' : mode === 'quarter' ? 'QTD' : 'YTD';
+    return {
+      mode: mode === 'month' || mode === 'quarter' ? mode : 'year', cmp: mode === 'year' ? 'ly' : cmp === 'ly' ? 'ly' : 'prev',
+      all, months, upto, partial, future: !months.length, fy: F,
+      label: partial && months.length ? `${label} · ${tag}` : label, through: partial ? P.ymd(thru) : null,
+      compare: {
+        months: months.map((m) => P.shiftMonth(m, -step)),
+        upto: partial ? P.weekKey(back(thru, step)) : upto,
+        label: partial && months.length ? `${cmpLabel} · same period` : cmpLabel,
+      },
+    };
+  }
+
+  // one company over several months: flows summed, balances latest, opening from the first month
+  companyPeriod(c, months, upto, translate) {
+    const key = `${c.id}|${months.join(',')}|${upto}|${translate ? 1 : 0}`;
+    this._period ||= new Map();
+    if (this._period.has(key)) return this._period.get(key);
+    const oc = this.m.openingCode;
+    const out = { A: {}, B: {}, M: [] };
+    for (const mo of months) {
+      const cm = mo ? this.companyMonth(c, mo, upto, [], translate, false) : null;
+      if (cm && !P.monthWeeks(mo).every((w) => w <= upto)) {
+        // P&L only counts for whole months: a part-month has weekly revenue but a full month's costs
+        const drop = new Set([...this.monthInputs, ...this.lines.filter((l) => l.kind === 'link').map((l) => l.code)]);
+        for (const vec of [cm.V.mA, cm.V.mB]) for (const k of Object.keys(vec)) if (drop.has(k)) delete vec[k];
+      }
+      out.M.push(cm ? { A: cm.V.mA, B: cm.V.mB } : null);
+      if (!cm) continue;
+      for (const [vn, src] of [['A', cm.V.mA], ['B', cm.V.mB]]) {
+        for (const [k, v] of Object.entries(src)) {
+          if (v == null) continue;
+          if (k === oc) { if (out[vn][oc] == null) out[vn][oc] = v; continue; }
+          if (this.itemKind(k) === 'balance') { out[vn][k] = v; continue; }
+          out[vn][k] = addv(out[vn][k] ?? null, v);
+        }
+      }
+    }
+    this._period.set(key, out);
+    return out;
+  }
+
+  periodView(nodeId, spec, { children = true } = {}) {
+    const node = this.tree.byId.get(nodeId);
+    const isCo = node.type === 'company';
+    const cur = [];
+    const cmp = [];
+    const perA = spec.months.map(() => []);
+    const perC = spec.months.map(() => []);
+    const status = [];
+    const lastM = spec.months[spec.months.length - 1] || spec.all[0];
+    for (const c of companiesUnder(this.tree, nodeId)) {
+      status.push({ id: c.id, name: c.name, status: this.monthStatus(c.id, lastM), reopened: this.mreopen.get(`${c.id}|${lastM}`) || 0, filed: !!this.mdata(c.id, lastM), ready: this.monthReady(c.id, lastM) });
+      if (!this.setup.get(c.id)) continue;
+      const a = this.companyPeriod(c, spec.months, spec.upto, !isCo);
+      cur.push({ A: a.A, B: a.B });
+      a.M.forEach((x, i) => x && perA[i].push(x));
+      const b = this.companyPeriod(c, spec.compare.months, spec.compare.upto, !isCo);
+      cmp.push({ C: b.A });
+      b.M.forEach((x, i) => x && perC[i].push({ C: x.A }));
+    }
+    const full = (vec) => ({ ...(vec || {}), ...derive(this.m, vec || {}) });
+    const V = { ...this.sumVecs(cur, !isCo), ...this.sumVecs(cmp, !isCo) };
+    const D = { A: full(V.A), B: full(V.B), C: full(V.C) };
+    const mk = (code, name, extra = {}) => ({
+      code, name, fmt: 'amount', hib: 1, depth: 0, ...extra,
+      p: { a: D.A[code] ?? null, t: extra.nature === 'opening' ? null : D.B[code] ?? null },
+      c: { a: D.C[code] ?? null },
+    });
+    const SERIES = ['REV_NET', 'REC_TOT', 'PAY_TOT', 'PAY_INV', 'PAY_INVM', 'REC_INV', 'NET_INV', 'CB_CLOSE', 'BD_CONF', 'ALL:PQ', 'PL_REV', 'PL_GP', 'PL_EBITDA', 'PL_NP'];
+    const series = spec.months.map((mo, i) => {
+      const a = this.sumVecs(perA[i], !isCo);
+      const c = this.sumVecs(perC[i], !isCo);
+      const fa = full(a.A);
+      const fb = full(a.B);
+      const fc = full(c.C);
+      const row = { month: mo, label: P.monthLabel(mo).slice(0, 3) };
+      for (const k of SERIES) { row[k] = fa[k] ?? null; row[`${k}_B`] = fb[k] ?? null; row[`${k}_C`] = fc[k] ?? null; }
+      return row;
+    });
+    const out = {
+      node: nodeOut(node, isCo ? node.currency : this.groupCcy),
+      mode: spec.mode, cmp: spec.cmp, fy: spec.fy, label: spec.label, through: spec.through, partial: spec.partial, future: spec.future,
+      compare_label: spec.compare.label, months: spec.months.map((m) => ({ key: m, label: P.monthLabel(m) })),
+      sections: this.sectionsFor(null, mk, isCo ? node.id : null, [D.A, D.C]),
+      series, coverage: this.coverage(status),
+    };
+    if (children && !isCo) out.children = this.childSummaries(node, (id) => this.periodView(id, spec, { children: false }));
+    return out;
   }
 
   monthView(nodeId, M, upto, { children = true } = {}) {

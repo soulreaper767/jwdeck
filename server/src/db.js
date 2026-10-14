@@ -278,6 +278,22 @@ for (const t of ['filings', 'month_filings', 'workflow_log']) {
     CREATE UNIQUE INDEX IF NOT EXISTS ux_${t}_uid ON ${t}(uid);`);
 }
 
+// reporting lines added after first release
+{
+  const has = (c) => db.prepare('SELECT id, sort, parent_id FROM lines WHERE code = ?').get(c);
+  const inv = has('PAY_INV');
+  if (inv && !has('PAY_INVM')) {
+    db.prepare(`INSERT INTO lines(code, name, section, parent_id, kind, scope, cf, nature, fmt, hib, budget, sort)
+      VALUES ('PAY_INVM', 'Investments – shares, term deposits, projects', 'CASH', ?, 'input', 'week', '-INV', 'flow', 'amount', 0, 1, ?)`).run(inv.parent_id, inv.sort + 1);
+    db.prepare("UPDATE lines SET name = 'Capex – plant, machinery, vehicles, buildings' WHERE code = 'PAY_INV' AND name = 'Investing – capex'").run();
+  }
+  const tot = has('PAY_TOT');
+  if (tot && has('REC_INV') && !has('NET_INV')) {
+    db.prepare(`INSERT INTO lines(code, name, section, kind, scope, formula, nature, fmt, hib, budget, sort)
+      VALUES ('NET_INV', 'Net investing (capex & investments less inflows)', 'CASH', 'formula', 'week', 'PAY_INV + PAY_INVM - REC_INV', 'flow', 'amount', 0, 0, ?)`).run(tot.sort + 1);
+  }
+}
+
 const DEFAULT_SETTINGS = {
   group_name: 'JW Group',
   group_currency: 'PKR',

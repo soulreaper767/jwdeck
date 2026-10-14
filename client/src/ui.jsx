@@ -148,3 +148,31 @@ export function PrintHeader({ node, title, period }) {
     </div>
   );
 }
+
+// month / quarter / year selection with comparative (stored in the shared view)
+export const periodQuery = (view, periods) => ({
+  mode: view.pmode && view.pmode !== 'week' ? view.pmode : 'month',
+  month: view.pmonth || periods?.last_month,
+  fy: view.pfy || periods?.current_fy,
+  q: view.pq || periods?.current_q,
+  cmp: view.pcmp || 'prev',
+});
+
+export function PeriodPicker({ mode: forced }) {
+  const { view, setView, periods } = useApp();
+  if (!periods) return null;
+  const q = periodQuery(view, periods);
+  const mode = forced || q.mode;
+  return (
+    <>
+      {mode === 'month' && <MonthSelect value={q.month} onChange={(m) => setView({ pmonth: m })} />}
+      {mode !== 'month' && (
+        <select value={q.fy} onChange={(e) => setView({ pfy: Number(e.target.value) })}>
+          {(periods.fys || []).map((f) => <option key={f.fy} value={f.fy}>{f.label}</option>)}
+        </select>
+      )}
+      {mode === 'quarter' && <Seg value={Number(q.q)} options={[1, 2, 3, 4].map((n) => [n, `Q${n}`])} onChange={(n) => setView({ pq: n })} />}
+      {mode !== 'year' && <Seg value={q.cmp} options={[['prev', mode === 'month' ? 'vs prev. month' : 'vs prev. quarter'], ['ly', 'vs last year']]} onChange={(c) => setView({ pcmp: c })} />}
+    </>
+  );
+}

@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell, ReferenceLine, LabelList } from 'recharts';
 import { useApp } from '../store.jsx';
 import { fv, fpct, UNITS } from '../lib/format.js';
-import { NodeSelect, WeekSelect, UnitSelect, Seg, Loading, Logo, PrintButton, PrintHeader } from '../ui.jsx';
+import { NodeSelect, WeekSelect, UnitSelect, Seg, Loading, Logo, PrintButton, PrintHeader, PeriodPicker, periodQuery } from '../ui.jsx';
 import { useView, Crumbs } from './Weekly.jsx';
 import { C, ChartCard } from './Overview.jsx';
 
@@ -16,7 +16,7 @@ function Diverging({ list, unit, code }) {
     <ResponsiveContainer>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 40, left: 8, bottom: 0 }}>
         <CartesianGrid stroke={C.grid} horizontal={false} />
-        <XAxis type="number" tickFormatter={(v) => `${v}%`} tick={{ fontSize: 12, fill: '#605E5C' }} axisLine={false} tickLine={false} />
+        <XAxis type="number" domain={[(min) => Math.min(0, Math.floor(min)), (max) => Math.max(0, Math.ceil(max))]} tickFormatter={(v) => `${Math.round(v * 10) / 10}%`} tick={{ fontSize: 12, fill: '#605E5C' }} axisLine={false} tickLine={false} />
         <YAxis type="category" dataKey="name" width={140} tick={{ fontSize: 12.5, fill: '#252423' }} axisLine={false} tickLine={false} />
         <Tooltip contentStyle={tip} formatter={(v, n, p) => [`${v > 0 ? '+' : ''}${v}% · actual ${fv(p.payload.a, fmtOf(code), unit)} vs budget ${fv(p.payload.t, fmtOf(code), unit)}`, 'vs budget']} />
         <ReferenceLine x={0} stroke="#252423" />
@@ -47,12 +47,14 @@ function Podium({ title, list, unit, code, hib, good }) {
 }
 
 export default function Analytics() {
-  const { view, setView } = useApp();
+  const { view, setView, periods } = useApp();
   const [basis, setBasis] = useState('mtd');
+  const per = ['month', 'quarter', 'year'].includes(basis);
+  const pq = periodQuery(view, periods);
   const [metric, setMetric] = useState('REV_NET');
   const [scope, setScope] = useState('companies');
   const unit = view.unit;
-  const { data, err } = useView('/view/analytics', { node: view.nodeId, week: view.week, basis }, [view.nodeId, view.week, basis]);
+  const { data, err } = useView('/view/analytics', { node: view.nodeId, week: view.week, basis, ...(per ? { ...pq, mode: basis } : {}) }, [view.nodeId, view.week, basis, per && pq.month, per && pq.fy, per && pq.q, per && pq.cmp]);
 
   if (err) return <div className="note err">{err}</div>;
   const sets = data ? (scope === 'units' && data.rankings.units.length ? data.rankings.units : data.rankings.companies.length ? data.rankings.companies : data.rankings.units) : [];
@@ -65,8 +67,8 @@ export default function Analytics() {
     <>
       <div className="bar">
         <NodeSelect value={view.nodeId} onChange={(id) => setView({ nodeId: id })} />
-        <WeekSelect value={view.week} onChange={(w) => setView({ week: w })} />
-        <Seg value={basis} options={[['wk', 'Week'], ['mtd', 'MTD'], ['ytd', 'YTD']]} onChange={setBasis} />
+        <Seg value={basis} options={[['wk', 'Week'], ['mtd', 'MTD'], ['ytd', 'YTD'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']]} onChange={setBasis} />
+        {per ? <PeriodPicker mode={basis} /> : <WeekSelect value={view.week} onChange={(w) => setView({ week: w })} />}
         <UnitSelect />
         <span className="sp" />
         <PrintButton />
@@ -75,7 +77,7 @@ export default function Analytics() {
         <div className="dash">
           <PrintHeader node={data.node} period={`${data.week.label} · ${data.basis_label}`} title="Performance analytics" />
           <Crumbs path={data.path} onPick={(id) => setView({ nodeId: id })} />
-          <div className="title"><Logo node={data.node} /><h1>{data.node.name}</h1><span className="meta">Performance · {data.week.label} · {data.basis_label} · {UNITS[unit].label}</span></div>
+          <div className="title"><Logo node={data.node} /><h1>{data.node.name}</h1><span className="meta">Performance · {data.period ? data.period.label : `${data.week.label} · ${data.basis_label}`} · {UNITS[unit].label}</span></div>
 
           {data.highlights.length > 0 && (
             <div className="hl-grid">
@@ -169,9 +171,9 @@ export default function Analytics() {
             )}
             {data.movers.length > 0 && (
               <div className="cc">
-                <div className="cc-h"><span className="cc-t">Biggest movers</span><span className="cc-s">this week vs last week</span></div>
+                <div className="cc-h"><span className="cc-t">Biggest movers</span><span className="cc-s">{data.period ? `${data.period.label} vs ${data.period.compare}` : "this week vs last week"}</span></div>
                 <table className="r pbi">
-                  <thead><tr><th className="l">Company</th><th className="l">Line</th><th>Last week</th><th>This week</th><th>Change</th></tr></thead>
+                  <thead><tr><th className="l">Company</th><th className="l">Line</th><th>{data.period ? data.period.compare.split(" · ")[0] : "Last week"}</th><th>{data.period ? data.period.label.split(" · ")[0] : "This week"}</th><th>Change</th></tr></thead>
                   <tbody>{data.movers.map((x, i) => (
                     <tr key={i}>
                       <td className="l">{x.company}</td><td className="l mute">{x.metric}</td>

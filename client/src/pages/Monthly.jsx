@@ -3,6 +3,7 @@ import { useApp } from '../store.jsx';
 import { vr, fpct, toCSV, download, UNITS } from '../lib/format.js';
 import { NodeSelect, MonthSelect, UnitSelect, Seg, Loading, Num, St, Logo, PrintButton, PrintHeader } from '../ui.jsx';
 import { useView, Crumbs, StatusCounts } from './Weekly.jsx';
+import { PeriodReport } from './PeriodDash.jsx';
 
 const emptyMonthRow = (x) => !x.group && [x.m?.a, x.m?.b, x.y?.a, x.y?.b, x.adj, ...(x.cols || [])].every((v) => v == null || v === 0);
 
@@ -21,7 +22,7 @@ function BA({ p, x, unit }) {
   );
 }
 
-function Head({ data, weeks }) {
+function Head({ data, weeks, cmp }) {
   return (
     <thead>
       <tr className="g">
@@ -29,18 +30,20 @@ function Head({ data, weeks }) {
         {weeks && <th colSpan={data.columns.length + 1} className="gap">Weeks</th>}
         <th colSpan={4} className="gap">{data.month_label}{data.complete ? '' : ` · to ${data.through ? data.through.slice(8) + ' ' + data.month_label.slice(0, 3) : '—'}`}</th>
         <th colSpan={4} className="gap">YTD · {data.fy_label}</th>
+        {cmp && <th colSpan={3} className="gap">vs {cmp}</th>}
       </tr>
       <tr>
         <th className="l first" style={{ minWidth: 220 }} />
         {weeks && <>{data.columns.map((c, i) => <th key={c.week} className={i === 0 ? 'gap' : ''}>{c.week.slice(5)}<br /><span className="mute">{c.label}</span></th>)}<th>Adj.</th></>}
         <th className="gap">Budget</th><th>Actual</th><th>Var</th><th>%</th>
         <th className="gap">Budget</th><th>Actual</th><th>Var</th><th>%</th>
+        {cmp && <><th className="gap">{cmp.split(' · ')[0]}</th><th>Change</th><th>%</th></>}
       </tr>
     </thead>
   );
 }
 
-function Row({ x: x0, unit, weeks, ncols }) {
+function Row({ x: x0, unit, weeks, ncols, cmp, c }) {
   const x = x0.fmt === 'flag' ? { ...x0, fmt: 'count' } : x0;
   return (
     <tr className={x.grand ? 'grand' : x.strong ? 'tot' : ''}>
@@ -48,18 +51,42 @@ function Row({ x: x0, unit, weeks, ncols }) {
       {weeks && <>{(x.cols || Array(ncols).fill(null)).map((c, j) => <Num key={j} className={j === 0 ? 'gap' : ''} v={c} fmt={x.fmt} unit={unit} />)}<Num v={x.adj} fmt={x.fmt} unit={unit} /></>}
       <BA p={x.m} x={x} unit={unit} />
       <BA p={x.y} x={x} unit={unit} />
+      {cmp && (() => {
+        const op = x.nature === 'opening' || x.fmt === 'percent';
+        const d = x.m?.a != null && c != null ? x.m.a - c : null;
+        const pct = d != null && c ? (d / Math.abs(c)) * 100 : null;
+        const cls = d == null || Math.abs(d) < 1 ? '' : (x.hib ? d >= 0 : d <= 0) ? 'good' : 'bad';
+        return <><Num className="gap lock" v={c} fmt={x.fmt} unit={unit} /><Num className={cls} v={op ? null : d} fmt={x.fmt} unit={unit} /><td className={`n ${cls}`}>{op ? '' : fpct(pct)}</td></>;
+      })()}
     </tr>
   );
 }
 
+const RMODES = [['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
+function RModeSeg() {
+  const { view, setView } = useApp();
+  return <Seg value={view.pmode && view.pmode !== 'week' ? view.pmode : 'month'} options={RMODES} onChange={(m) => setView({ pmode: m })} />;
+}
+
 export default function Monthly() {
+  const { view } = useApp();
+  if (view.pmode === 'quarter' || view.pmode === 'year') return <PeriodReport modeBar={<RModeSeg />} />;
+  return <MonthReport />;
+}
+
+function MonthReport() {
   const { view, setView, periods } = useApp();
-  const month = view.month && /^\d{4}-\d{2}$/.test(view.month) ? view.month : periods?.last_month;
+  const month = view.pmonth || (view.month && /^\d{4}-\d{2}$/.test(view.month) ? view.month : periods?.last_month);
+  const cmpMode = view.pcmp || 'prev';
+  const { data: cmpData } = useView('/view/period', { node: view.nodeId, mode: 'month', month, cmp: cmpMode }, [view.nodeId, month, cmpMode]);
+  const cflat = cmpData ? Object.fromEntries(cmpData.sections.flatMap((s) => s.rows).filter((x) => x.code).map((x) => [x.code, x.c.a])) : {};
+  const cchild = (id, code) => cmpData?.children?.find((x) => x.id === id)?.rows[code]?.c.a ?? null;
+  const cmp = cmpData?.compare_label;
   const [weeks, setWeeks] = useState(false);
   const [full, setFull] = useState(false);
   const { data, err } = useView('/view/month', { node: view.nodeId, month }, [view.nodeId, month]);
   const unit = view.unit;
-  const cols = data ? 1 + (weeks ? data.columns.length + 1 : 0) + 8 : 1;
+  const cols = data ? 1 + (weeks ? data.columns.length + 1 : 0) + 8 + (cmp ? 3 : 0) : 1;
   const allRows = data ? data.sections.flatMap((s) => s.rows).filter((x) => x.code) : [];
 
   const exportCsv = () => {
@@ -73,7 +100,9 @@ export default function Monthly() {
     <>
       <div className="bar">
         <NodeSelect value={view.nodeId} onChange={(id) => setView({ nodeId: id })} />
-        <MonthSelect value={month} onChange={(m) => setView({ month: m })} />
+        <RModeSeg />
+        <MonthSelect value={month} onChange={(m) => setView({ month: m, pmonth: m })} />
+        <Seg value={cmpMode} options={[['prev', 'vs prev. month'], ['ly', 'vs last year']]} onChange={(c) => setView({ pcmp: c })} />
         <UnitSelect />
         <label className="c"><input type="checkbox" checked={weeks} onChange={(e) => setWeeks(e.target.checked)} />Weeks</label>
         <span className="sp" />
@@ -96,14 +125,14 @@ export default function Monthly() {
           {data.children && <h2 className="part">{data.node.type === 'group' ? 'Group summary' : 'Cluster summary'}</h2>}
           <div className="wrap">
             <table className="r">
-              <Head data={data} weeks={weeks} />
+              <Head data={data} weeks={weeks} cmp={cmp} />
               <tbody>
                 {data.sections.map((s) => (
                   <Fragment key={s.code}>
                     <tr className="sec"><td colSpan={cols} className="first">{s.name}</td></tr>
                     {s.rows.filter((x) => !emptyMonthRow(x)).map((x, i) => (x.group
                       ? <tr key={`g${i}`} className="grp"><td colSpan={cols} className="l first">{x.name}</td></tr>
-                      : <Row key={x.code} x={x} unit={unit} weeks={weeks} ncols={data.columns.length} />))}
+                      : <Row key={x.code} x={x} unit={unit} weeks={weeks} ncols={data.columns.length} cmp={cmp} c={cflat[x.code] ?? null} />))}
                   </Fragment>
                 ))}
               </tbody>
@@ -125,10 +154,10 @@ export default function Monthly() {
                   </div>
                   <div className="wrap">
                     <table className="r">
-                      <Head data={data} weeks={weeks} />
+                      <Head data={data} weeks={weeks} cmp={cmp} />
                       <tbody>
                         {(full ? allRows : KEY_MONTH.map((k) => allRows.find((x) => x.code === k)).filter(Boolean)).map((x) => (
-                          c.rows[x.code] ? <Row key={x.code} x={{ ...x, ...c.rows[x.code], name: x.name, depth: full ? x.depth : 0 }} unit={unit} weeks={weeks} ncols={data.columns.length} /> : null
+                          c.rows[x.code] ? <Row key={x.code} x={{ ...x, ...c.rows[x.code], name: x.name, depth: full ? x.depth : 0 }} unit={unit} weeks={weeks} ncols={data.columns.length} cmp={cmp} c={cchild(c.id, x.code)} /> : null
                         ))}
                       </tbody>
                     </table>

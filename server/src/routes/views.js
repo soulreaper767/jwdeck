@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, plainAll } from '../db.js';
+import { db, plainAll, getSettings } from '../db.js';
 import { canView, scopeRoots, canPrepare, actions } from '../auth.js';
 import { Engine, companiesUnder, pathOf } from '../engine.js';
 import * as P from '../periods.js';
@@ -23,7 +23,11 @@ r.get('/periods', h(() => {
   const curM = P.monthOfDate(new Date());
   const months = [];
   for (let i = 0; i < 24; i++) { const m = P.shiftMonth(curM, -i); months.push({ key: m, label: P.monthLabel(m) }); }
-  return { current_week: cur, last_closed: P.lastClosedWeek(), weeks, months, current_month: curM, last_month: P.shiftMonth(curM, -1) };
+  const fs = Number(getSettings().fiscal_year_start_month || 7);
+  const fyNow = Number(P.fyStart(curM, fs).slice(0, 4));
+  const fys = [fyNow + 1, fyNow, fyNow - 1, fyNow - 2].map((y) => ({ fy: y, label: P.fyLabel(`${y}-${String(fs).padStart(2, '0')}`, fs) }));
+  const currentQ = Math.floor((P.fyMonths(curM, fs).length - 1) / 3) + 1;
+  return { current_week: cur, last_closed: P.lastClosedWeek(), weeks, months, current_month: curM, last_month: P.shiftMonth(curM, -1), fys, current_fy: fyNow, current_q: currentQ };
 }));
 
 r.get('/view/week', h((req) => {
@@ -35,6 +39,13 @@ r.get('/view/month', h((req) => {
   const { eng, nodeId } = ctx(req);
   const M = P.isMonth(req.query.month) ? req.query.month : P.shiftMonth(P.monthOfDate(new Date()), -1);
   return { ...eng.monthView(nodeId, M, P.lastClosedWeek()), path: pathOf(eng.tree, nodeId) };
+}));
+
+// Month / quarter / year (to date) with a comparative: previous period or same period last year
+r.get('/view/period', h((req) => {
+  const { eng, nodeId } = ctx(req);
+  const spec = eng.periodSpec(req.query);
+  return { ...eng.periodView(nodeId, spec), path: pathOf(eng.tree, nodeId) };
 }));
 
 r.get('/view/trend', h((req) => {

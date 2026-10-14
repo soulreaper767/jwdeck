@@ -5,7 +5,8 @@ import {
 import { useApp } from '../store.jsx';
 import { api, qs } from '../lib/api.js';
 import { fv, vr, fpct, UNITS } from '../lib/format.js';
-import { NodeSelect, WeekSelect, UnitSelect, Loading, St, Logo, PrintButton, PrintHeader } from '../ui.jsx';
+import { NodeSelect, WeekSelect, UnitSelect, Seg, Loading, St, Logo, PrintButton, PrintHeader } from '../ui.jsx';
+import PeriodDash from './PeriodDash.jsx';
 import { useView, Crumbs, StatusCounts } from './Weekly.jsx';
 
 // Power BI–style palette
@@ -37,7 +38,7 @@ export function KpiCard({ title, actual, budget, fmt = 'amount', unit, hib = 1, 
   return (
     <div className="kc">
       <div className="kc-t">{title}</div>
-      <div className="kc-v" title={actual == null ? '' : fv(actual, fmt === 'amount' ? 'amount' : fmt, '1')}>{actual == null ? '–' : fv(actual, fmt, unit)}</div>
+      <div className="kc-v" title={actual == null ? '' : fv(actual, fmt === 'amount' ? 'amount' : fmt, '1')}>{actual == null ? '–' : actual === 0 ? '0' : fv(actual, fmt, unit)}</div>
       {budget != null && (
         <>
           <div className="kc-row">
@@ -70,7 +71,20 @@ export function ChartCard({ title, sub, children, h = 260 }) {
 
 const axis = { tick: { fontSize: 12, fill: '#605E5C' }, axisLine: false, tickLine: false };
 
+const MODES = [['week', 'Week'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
+
 export default function Overview() {
+  const { view } = useApp();
+  if (view.pmode && view.pmode !== 'week') return <PeriodDash modeBar={<ModeSeg />} />;
+  return <WeekOverview />;
+}
+
+function ModeSeg() {
+  const { view, setView } = useApp();
+  return <Seg value={view.pmode || 'week'} options={MODES} onChange={(m) => setView({ pmode: m })} />;
+}
+
+function WeekOverview() {
   const { view, setView, periods } = useApp();
   const unit = view.unit;
   const { data, err } = useView('/view/week', { node: view.nodeId, week: view.week }, [view.nodeId, view.week]);
@@ -112,6 +126,7 @@ export default function Overview() {
     <>
       <div className="bar">
         <NodeSelect value={view.nodeId} onChange={(id) => setView({ nodeId: id })} />
+        <ModeSeg />
         <WeekSelect value={view.week} onChange={(wk) => setView({ week: wk, month: null })} />
         <UnitSelect />
         <span className="sp" />
@@ -138,6 +153,14 @@ export default function Overview() {
             <KpiCard title="Payments · MTD" actual={w.PAY_TOT?.mtd.a} budget={w.PAY_TOT?.mtd.t} unit={unit} hib={0} spark={trend} sparkKey="PAY_TOT" />
             <KpiCard title="Closing cash & bank" actual={w.CB_CLOSE?.wk.a} budget={w.CB_CLOSE?.wk.t} unit={unit} spark={trend} sparkKey="CB_CLOSE" />
             <KpiCard title="Production · MTD (all units)" actual={w['ALL:PQ']?.mtd.a} budget={w['ALL:PQ']?.mtd.t} fmt="qty" unit={unit} spark={trend} sparkKey="ALL:PQ" />
+          </div>
+
+          <h2 className="part">Capex & investments</h2>
+          <div className="kgrid">
+            <KpiCard title="Capex · MTD" actual={w.PAY_INV?.mtd.a ?? 0} budget={w.PAY_INV?.mtd.t} unit={unit} hib={0} foot={w.PAY_INV?.ytd.a != null ? `YTD ${fv(w.PAY_INV.ytd.a, 'amount', unit)}${w.PAY_INV.ytd.t != null ? ` of ${fv(w.PAY_INV.ytd.t, 'amount', unit)}` : ''}` : null} />
+            <KpiCard title="Investments · MTD" actual={w.PAY_INVM?.mtd.a ?? 0} budget={w.PAY_INVM?.mtd.t} unit={unit} hib={0} foot={w.PAY_INVM?.ytd.a != null ? `YTD ${fv(w.PAY_INVM.ytd.a, 'amount', unit)}` : null} />
+            <KpiCard title="Investing inflows · MTD" actual={w.REC_INV?.mtd.a ?? 0} budget={w.REC_INV?.mtd.t} unit={unit} />
+            <KpiCard title="Net investing · MTD" actual={w.NET_INV?.mtd.a ?? 0} budget={w.NET_INV?.mtd.t} unit={unit} hib={0} foot={w.NET_INV?.wk.a != null ? `This week ${fv(w.NET_INV.wk.a, 'amount', unit) || '0'}` : null} />
           </div>
 
           <h2 className="part">Business development</h2>

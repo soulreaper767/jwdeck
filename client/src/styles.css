@@ -322,3 +322,10 @@ header.top .navmore-p a.active { border: 0; background: var(--sec); }
 tr.adjrow td.first { box-shadow: inset 3px 0 0 #D9730D; }
 td.adjv { color: #B24D1D; font-weight: bold; cursor: help; }
 .calc { color: var(--mute); }
+/* comparative period tag */
+.tag-c { font-size: 10.5px; text-transform: uppercase; letter-spacing: .5px; padding: 1px 6px; border-radius: 3px; background: #F0F0F0; color: #605E5C; border: 1px solid #D6D6D6; font-weight: bold; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pcard .kc-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.kc-row.pc { flex-wrap: nowrap; height: 22px; }
+.kc-row.pc > span:nth-child(2) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.kc-row.pc .chip { flex: none; }
+.kgrid.pgrid { grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); }

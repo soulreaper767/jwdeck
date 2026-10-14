@@ -78,13 +78,15 @@ tx(() => {
     ['REV_ADJ', 'Less: returns, discounts & rebates', 'REVREC', null, 'input', null, W, { hib: 0, budget: 1 }],
     ['REV_NET', 'Net revenue', 'REVREC', null, 'formula', 'REV_GROSS - REV_ADJ', W, { kpi: 1 }],
     ['REC_OPS', 'Operating – customers', 'REVREC', 'REC_TOT', 'input', null, W, { cf: '+OPS', budget: 1 }],
-    ['REC_INV', 'Investing – asset sales, investment income', 'REVREC', 'REC_TOT', 'input', null, W, { cf: '+INV', budget: 1 }],
+    ['REC_INV', 'Investing – asset sales, investment income & maturities', 'REVREC', 'REC_TOT', 'input', null, W, { cf: '+INV', budget: 1 }],
     ['REC_FIN', 'Financing – loans, equity received', 'REVREC', 'REC_TOT', 'input', null, W, { cf: '+FIN', budget: 1 }],
     ['REC_TOT', 'Total recoveries', 'REVREC', null, 'sum', null, W, { kpi: 1 }],
     ['PAY_OPS', 'Operating – suppliers, salaries, expenses', 'CASH', 'PAY_TOT', 'input', null, W, { cf: '-OPS', hib: 0, budget: 1 }],
-    ['PAY_INV', 'Investing – capex', 'CASH', 'PAY_TOT', 'input', null, W, { cf: '-INV', hib: 0, budget: 1 }],
+    ['PAY_INV', 'Capex – plant, machinery, vehicles, buildings', 'CASH', 'PAY_TOT', 'input', null, W, { cf: '-INV', hib: 0, budget: 1 }],
+    ['PAY_INVM', 'Investments – shares, term deposits, projects', 'CASH', 'PAY_TOT', 'input', null, W, { cf: '-INV', hib: 0, budget: 1 }],
     ['PAY_FIN', 'Financing – loan repayments, markup, dividends', 'CASH', 'PAY_TOT', 'input', null, W, { cf: '-FIN', hib: 0, budget: 1 }],
     ['PAY_TOT', 'Total payments', 'CASH', null, 'sum', null, W, { hib: 0, kpi: 1 }],
+    ['NET_INV', 'Net investing (capex & investments less inflows)', 'CASH', null, 'formula', 'PAY_INV + PAY_INVM - REC_INV', W, { hib: 0 }],
     ['CB_OPEN', 'Opening cash & bank', 'CASH', null, 'opening', null, W, { nature: 'opening' }],
     ['NETCF', 'Net cash flow', 'CASH', null, 'formula', 'REC_TOT - PAY_TOT', W, {}],
     ['CB_OTHER', 'Other movements', 'CASH', null, 'input', null, W, { note: 1 }],
@@ -141,7 +143,8 @@ const PROFILES = {
   JWP: { skus: [['Corrugated cartons', 'pcs', 70000, 0.97, 85], ['Flexible packaging', 'kg', 5000, 0.95, 900]], other: 90e3, ret: 0.012, opex: 0.87, gm: 0.24, cash: 90e6 },
 };
 const PL = { PL_ADMIN: 0.06, PL_SELL: 0.07, PL_OTHINC: 0.005, PL_DEP: 0.025, PL_FIN: 0.02, PL_TAX: 0.025 };
-const START = '2026-W27';
+// a full prior year (FY25-26) so last-year comparatives have figures
+const START = '2025-W27';
 const LAST = P.lastClosedWeek();
 const weeks = P.weekRange(START, LAST);
 
@@ -174,10 +177,12 @@ tx(() => {
       bA.run(cid, fy, 'BD_LEADS', Math.round(365 / 7 * 6 * up));
       bA.run(cid, fy, 'BD_LEADS_V', Math.round(net * 0.25));
       bA.run(cid, fy, 'BD_CONF', Math.round(net * 0.12));
+      bA.run(cid, fy, 'PAY_INV', Math.round(net * 0.05));
+      bA.run(cid, fy, 'PAY_INVM', Math.round(net * 0.025));
       if (fy === 2026) {
-        bA.run(cid, fy, 'PAY_INV', Math.round(net * 0.05));
         bM.run(cid, '2026-09', 'PAY_INV', Math.round(net * 0.02));
         bM.run(cid, '2027-01', 'PAY_INV', Math.round(net * 0.02));
+        bM.run(cid, '2026-12', 'PAY_INVM', Math.round(net * 0.01));
       }
     }
   }
@@ -224,7 +229,7 @@ tx(() => {
     });
     // initiatives: one record each, spread over the weeks
     INITS[code].forEach(([title, owner], i) => {
-      const w = weeks[Math.min(1 + i * 4, weeks.length - 1)];
+      const w = weeks[Math.max(0, weeks.length - 15) + Math.min(1 + i * 4, 14)] || weeks.at(-1);
       const start = new Date(P.weekStart(w).getTime() + 2 * DAY);
       const st = i === 0 ? 'done' : i === INITS[code].length - 1 ? 'planned' : 'in_progress';
       ii.run(crypto.randomUUID(), cid, title, owner, P.ymd(start), P.ymd(new Date(start.getTime() + (60 + i * 30) * DAY)), st,
@@ -275,7 +280,8 @@ tx(() => {
       const put = (item, month, v) => { (values[item] ||= {})[month] = v; };
       for (const s of P.segments(w)) {
         const d = s.days;
-        const season = 1 + 0.06 * Math.sin((wi / 52) * 2 * Math.PI);
+        // last year ~7% smaller
+        const season = (1 + 0.06 * Math.sin((wi / 52) * 2 * Math.PI)) * (w < '2026-W27' ? 0.93 : 1);
         let gross = 0;
         p.skus.forEach(([, , q, sr, pr], i) => {
           const prod = Math.round(q * d * jitter(0.08) * season);
@@ -297,6 +303,7 @@ tx(() => {
         if (s.closes_month || (wi % 9 === 4 && s === P.segments(w)[0])) put('PAY_FIN', s.month, k(net * 0.04 * 4.3 * jitter(0.1)));
         if (wi % 7 === 3) put('PAY_INV', s.month, k(net * 0.25 * jitter(0.3)));
         if (wi % 11 === 6) put('REC_INV', s.month, k(net * 0.03));
+        if (wi % 9 === 4) put('PAY_INVM', s.month, k(net * 0.18 * jitter(0.3)));
         if (code === 'RJB' && wi === 5) put('REC_FIN', s.month, 25e6);
       }
       const bd = bdFromRegisters(cid, w);
@@ -333,7 +340,8 @@ const eng2 = new Engine();
 const mrIns = db.prepare('INSERT INTO month_reports(company_id, month_key, status, revision, remarks, updated_by, updated_at) VALUES (?,?,?,?,?,?,?)');
 const mvIns = db.prepare('INSERT INTO month_values(report_id, item, value) VALUES (?,?,?)');
 const mfIns = db.prepare('INSERT INTO month_filings(report_id, company_id, month_key, revision, data_json, filed_by, filed_at) VALUES (?,?,?,?,?,?,?)');
-const MONTHS = { '2026-07': 'approved', '2026-08': 'approved' };
+const MONTHS = {};
+for (let m = '2025-07'; m <= '2026-08'; m = P.shiftMonth(m, 1)) MONTHS[m] = 'approved';
 const SEP = { PHL: 'approved', RJF: 'cluster_ok', RJB: 'company_ok', JWA: 'submitted', EPS: 'draft', JWP: null };
 tx(() => {
   for (const [code, p] of Object.entries(PROFILES)) {
@@ -356,5 +364,5 @@ tx(() => {
   }
 });
 
-console.log(`Demo loaded: ${weeks.length} weeks (${START} to ${LAST}), month close Jul–Sep.`);
+console.log(`Demo loaded: ${weeks.length} weeks (${START} to ${LAST}), month close Jul 2025–Sep 2026.`);
 console.log('admin@jwdash.local / admin123 · ceo@jwdash.local / ceo123 · others / demo123');

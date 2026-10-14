@@ -45,8 +45,12 @@ r.get('/view/analytics', h((req) => {
   if (!node) throw notFound('Node not found');
   if (!canView(req.user, nodeId, eng.tree)) throw forbidden();
   const W = P.isWeek(req.query.week) ? req.query.week : P.lastClosedWeek();
-  const basis = ['wk', 'mtd', 'ytd'].includes(req.query.basis) ? req.query.basis : 'mtd';
+  const periodMode = ['month', 'quarter', 'year'].includes(req.query.mode) ? req.query.mode : null;
+  const spec = periodMode ? eng.periodSpec(req.query) : null;
+  const basis = periodMode ? 'p' : ['wk', 'mtd', 'ytd'].includes(req.query.basis) ? req.query.basis : 'mtd';
   const M = P.shiftMonth(P.monthOfDate(new Date()), -1);
+  const pmemo = new Map();
+  const pv = (id) => { if (!pmemo.has(id)) pmemo.set(id, flat(eng.periodView(id, spec, { children: false }))); return pmemo.get(id); };
 
   const memo = new Map();
   const wv = (id, w = W) => {
@@ -63,15 +67,15 @@ r.get('/view/analytics', h((req) => {
 
   // ---- rankings
   const rankings = {
-    units: units.length ? METRICS.map((m) => ({ ...m, list: rank(units, (id) => wv(id), m, basis) })) : [],
-    companies: companies.length > 1 ? METRICS.map((m) => ({ ...m, list: rank(companies, (id) => wv(id), m, basis).map((e) => ({ ...e, ...label(eng.tree.byId.get(e.id)) })) })) : [],
-    month: companies.length > 1 ? MONTH_METRICS.map((m) => ({ ...m, list: rank(companies, (id) => mv(id), m, 'm').map((e) => ({ ...e, ...label(eng.tree.byId.get(e.id)) })) })) : [],
+    units: units.length ? METRICS.map((m) => ({ ...m, list: rank(units, (id) => (spec ? pv(id) : wv(id)), m, basis) })) : [],
+    companies: companies.length > 1 ? METRICS.map((m) => ({ ...m, list: rank(companies, (id) => (spec ? pv(id) : wv(id)), m, basis).map((e) => ({ ...e, ...label(eng.tree.byId.get(e.id)) })) })) : [],
+    month: companies.length > 1 ? MONTH_METRICS.map((m) => ({ ...m, list: rank(companies, (id) => (spec ? pv(id) : mv(id)), m, spec ? 'p' : 'm').map((e) => ({ ...e, ...label(eng.tree.byId.get(e.id)) })) })) : [],
   };
 
   // ---- SKUs: sales value vs budget for every SKU under this node
   const skus = [];
   for (const c of companies) {
-    const rows = eng.weekView(c.id, W, null, { children: false }).sections.find((s) => s.code === 'PRODSALES')?.rows || [];
+    const rows = (spec ? eng.periodView(c.id, spec, { children: false }) : eng.weekView(c.id, W, null, { children: false })).sections.find((s) => s.code === 'PRODSALES')?.rows || [];
     let group = null;
     for (const x of rows) {
       if (x.group) { group = x.name; continue; }
@@ -87,11 +91,12 @@ r.get('/view/analytics', h((req) => {
   const prevW = P.shiftWeek(W, -1);
   const movers = [];
   for (const c of companies) {
-    const now = wv(c.id);
-    const before = wv(c.id, prevW);
-    for (const m of METRICS) {
-      const a = now[m.code]?.wk.a;
-      const b = before[m.code]?.wk.a;
+    const now = spec ? pv(c.id) : wv(c.id);
+    const before = spec ? null : wv(c.id, prevW);
+    for (const m of [...METRICS, ...(spec ? MONTH_METRICS : [])]) {
+      if (m.code === 'CB_CLOSE' && spec) continue;
+      const a = spec ? now[m.code]?.p.a : now[m.code]?.wk.a;
+      const b = spec ? now[m.code]?.c.a : before[m.code]?.wk.a;
       if (a == null || b == null || b === 0) continue;
       const ch = ((a - b) / Math.abs(b)) * 100;
       movers.push({ company: c.name, company_id: c.id, metric: m.name, code: m.code, hib: m.hib, now: a, before: b, pct: ch, good: m.hib ? ch >= 0 : ch <= 0 });
@@ -116,7 +121,8 @@ r.get('/view/analytics', h((req) => {
   }).sort((x, y) => (y.on - y.off) - (x.on - x.off));
 
   // ---- highlights (plain statements generated from the figures)
-  const B = { wk: 'this week', mtd: 'month to date', ytd: 'year to date' }[basis];
+  const B = spec ? spec.label : { wk: 'this week', mtd: 'month to date', ytd: 'year to date' }[basis];
+  const vsWhat = spec ? spec.compare.label : 'last week';
   const highlights = [];
   const pickList = rankings.companies.length ? rankings.companies : rankings.units;
   for (const m of pickList.filter((x) => ['REV_NET', 'REC_TOT', 'BD_CONF'].includes(x.code))) {
@@ -135,21 +141,22 @@ r.get('/view/analytics', h((req) => {
   }
   const bigUp = movers.find((x) => x.good);
   const bigDown = movers.find((x) => !x.good);
-  if (bigUp) highlights.push({ good: true, text: `Biggest improvement: ${bigUp.company} ${bigUp.metric.toLowerCase()} ${bigUp.pct >= 0 ? '+' : ''}${bigUp.pct.toFixed(1)}% on last week` });
-  if (bigDown) highlights.push({ good: false, text: `Biggest setback: ${bigDown.company} ${bigDown.metric.toLowerCase()} ${bigDown.pct >= 0 ? '+' : ''}${bigDown.pct.toFixed(1)}% on last week` });
+  if (bigUp) highlights.push({ good: true, text: `Biggest improvement: ${bigUp.company} ${bigUp.metric.toLowerCase()} ${bigUp.pct >= 0 ? '+' : ''}${bigUp.pct.toFixed(1)}% vs ${vsWhat}` });
+  if (bigDown) highlights.push({ good: false, text: `Biggest setback: ${bigDown.company} ${bigDown.metric.toLowerCase()} ${bigDown.pct >= 0 ? '+' : ''}${bigDown.pct.toFixed(1)}% vs ${vsWhat}` });
   const longOn = streaks.find((s) => s.on >= 3);
   if (longOn) highlights.push({ good: true, text: `${longOn.company} on or above net revenue budget ${longOn.on} weeks running` });
   const longOff = [...streaks].sort((a, b) => b.off - a.off).find((s) => s.off >= 3);
   if (longOff) highlights.push({ good: false, text: `${longOff.company} below net revenue budget ${longOff.off} weeks running` });
   const mEb = rankings.month.find((m) => m.code === 'PL_EBITDA')?.list.filter((e) => e.pct != null) || [];
+  const mLabel = spec ? spec.label : P.monthLabel(M);
   if (mEb.length > 1) {
-    highlights.push({ good: true, text: `${P.monthLabel(M)} EBITDA best: ${mEb[0].name} ${mEb[0].pct >= 0 ? '+' : ''}${mEb[0].pct.toFixed(1)}% vs budget` });
-    highlights.push({ good: false, text: `${P.monthLabel(M)} EBITDA weakest: ${mEb.at(-1).name} ${mEb.at(-1).pct.toFixed(1)}% vs budget` });
+    highlights.push({ good: true, text: `${mLabel} EBITDA best: ${mEb[0].name} ${mEb[0].pct >= 0 ? '+' : ''}${mEb[0].pct.toFixed(1)}% vs budget` });
+    highlights.push({ good: false, text: `${mLabel} EBITDA weakest: ${mEb.at(-1).name} ${mEb.at(-1).pct.toFixed(1)}% vs budget` });
   }
 
   return {
     node: { id: node.id, name: node.name, type: node.type, logo: node.meta?.logo || null }, path: pathOf(eng.tree, nodeId),
-    week: P.describeWeek(W), basis, basis_label: B, month_label: P.monthLabel(M),
+    week: P.describeWeek(W), basis, basis_label: B, month_label: spec ? spec.label : P.monthLabel(M), compare_label: vsWhat, period: spec ? { mode: spec.mode, label: spec.label, compare: spec.compare.label } : null,
     rankings, skus, movers: movers.slice(0, 12), streaks, highlights,
   };
 }));
