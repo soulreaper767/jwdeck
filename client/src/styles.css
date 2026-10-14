@@ -200,10 +200,17 @@ h2.part { margin: 22px 0 8px; font-size: 19px; color: var(--ink); }
 .ugrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
 .uc { padding: 12px 14px; cursor: pointer; display: flex; flex-direction: column; gap: 6px; border-top: 3px solid var(--accent); transition: box-shadow .15s; }
 .uc:hover { box-shadow: 0 2px 4px rgba(0, 0, 0, .08), 0 8px 18px rgba(18, 35, 158, .12); }
-.uc-h { display: flex; align-items: center; gap: 8px; font-size: 16px; }
-.uc-v { font-size: 24px; font-weight: bold; }
-.uc-m { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 12px; font-size: 13px; color: var(--mute); border-top: 1px solid var(--line-2); padding-top: 6px; }
-.uc-m b { color: var(--ink); font-weight: normal; float: right; }
+.uc-h { display: flex; align-items: center; gap: 8px; font-size: 16px; height: 34px; min-width: 0; }
+.uc-h b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.uc-s { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.uc-s span { display: flex; flex-direction: column; align-items: center; font-size: 11px; color: var(--mute); background: #F4F5F7; border-radius: 4px; padding: 3px 0; text-transform: uppercase; letter-spacing: .3px; }
+.uc-s span b { font-size: 16px; color: var(--mute); }
+.uc-s .ok b { color: #1A7F37; } .uc-s .rv b { color: var(--accent); } .uc-s .pd b { color: #B26B00; } .uc-s .lp b { color: var(--bad-ink); }
+.uc-l { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--mute); font-weight: bold; margin-top: 2px; }
+.uc-v { font-size: 24px; font-weight: bold; line-height: 1.1; }
+.uc-b { display: flex; align-items: center; gap: 7px; font-size: 13.5px; color: var(--ink-2); height: 22px; }
+.uc-m { display: grid; grid-template-columns: 1fr auto 1fr auto; gap: 3px 10px; font-size: 13px; color: var(--mute); border-top: 1px solid var(--line-2); padding-top: 6px; }
+.uc-m b { color: var(--ink); font-weight: normal; text-align: right; }
 
 /* analytics & registers */
 .hl-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 12px; }

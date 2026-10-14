@@ -280,19 +280,24 @@ export default function Overview() {
               <div className="ugrid">
                 {data.children.map((c) => {
                   const r = c.rows;
-                  const v = vr(r.REV_NET?.mtd.a, r.REV_NET?.mtd.t, 1);
-                  const f = (x) => fv(x, 'amount', unit) || '–';
+                  const v = vr(r.REV_NET?.mtd.a ?? 0, r.REV_NET?.mtd.t ?? 0, 1);
+                  const f = (x) => { const o = fv(x, 'amount', unit); return !o || o === '–' ? '0' : o; };
                   const mc = mon?.children?.find((x) => x.id === c.id)?.rows || {};
+                  const by = c.type === 'company' ? { [c.status || 'new']: 1 } : c.coverage?.by || {};
+                  const n = (...k) => k.reduce((a, s) => a + (by[s] || 0), 0);
+                  const stat = [['Approved', n('approved'), 'ok'], ['In review', n('submitted', 'company_ok', 'cluster_ok'), 'rv'], ['Pending', n('draft', 'new', 'reopened'), 'pd'], ['Lapsed', n('lapsed'), 'lp']];
                   return (
                     <div key={c.id} className="uc" onClick={() => setView({ nodeId: c.id })}>
-                      <div className="uc-h"><Logo node={c} size="sm" /><b>{c.name}</b><span className="sp" />{c.type === 'company' ? <St s={c.status} reopened={c.reopened} /> : <StatusCounts by={c.coverage.by} />}</div>
-                      <div className="uc-v">{f(r.REV_NET?.mtd.a)} <span className="mute small">net revenue MTD</span></div>
-                      <div className="kc-row"><span className="tag-b">Budget</span><span>{f(r.REV_NET?.mtd.t)}</span><span className="sp" />{v.pct != null && <span className={`chip ${v.cls}`}>{fpct(v.pct)}</span>}</div>
+                      <div className="uc-h"><Logo node={c} size="sm" /><b title={c.name}>{c.name}</b></div>
+                      <div className="uc-s">{stat.map(([l, x, k]) => <span key={l} className={x ? k : ''}><b>{x}</b>{l}</span>)}</div>
+                      <div className="uc-l">Net revenue MTD</div>
+                      <div className="uc-v">{f(r.REV_NET?.mtd.a)}</div>
+                      <div className="uc-b"><span className="tag-b">Budget</span><span>{f(r.REV_NET?.mtd.t)}</span><span className="sp" /><span className={`chip ${v.cls}`}>{fpct(v.pct ?? 0)}</span></div>
                       <div className="uc-m">
-                        <span>Recoveries <b>{f(r.REC_TOT?.mtd.a)}</b></span>
-                        <span>Cash <b>{f(r.CB_CLOSE?.wk.a)}</b></span>
-                        <span>Orders <b>{f(r.BD_CONF?.mtd.a)}</b></span>
-                        <span>EBITDA {mon?.month_label.slice(0, 3)} <b>{f(mc.PL_EBITDA?.m.a)}</b></span>
+                        <span>Recoveries</span><b>{f(r.REC_TOT?.mtd.a)}</b>
+                        <span>Cash</span><b>{f(r.CB_CLOSE?.wk.a)}</b>
+                        <span>Orders</span><b>{f(r.BD_CONF?.mtd.a)}</b>
+                        <span>EBITDA {mon?.month_label?.slice(0, 3) || ''}</span><b>{f(mc.PL_EBITDA?.m.a)}</b>
                       </div>
                     </div>
                   );
