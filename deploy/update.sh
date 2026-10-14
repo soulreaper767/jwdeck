@@ -13,7 +13,7 @@ sudo -u "$APP_USER" -H bash -lc "
   git fetch origin $BRANCH
   git reset --hard origin/$BRANCH
   npm --prefix server ci --omit=dev --no-audit --no-fund
-  npm --prefix client ci --no-audit --no-fund
+  npm --prefix client ci --include=dev --no-audit --no-fund
   npm --prefix client run build
 "
 systemctl stop jwdeck

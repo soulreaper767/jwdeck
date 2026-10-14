@@ -66,7 +66,7 @@ sudo -u "$APP_USER" -H bash -lc "
   set -a; . $ENV_FILE; set +a
   cd $APP_DIR
   npm --prefix server ci --omit=dev --no-audit --no-fund
-  npm --prefix client ci --no-audit --no-fund
+  npm --prefix client ci --include=dev --no-audit --no-fund
   npm --prefix client run build
   if [ ! -f \"\$JW_DB\" ]; then
     if [ '${DEMO:-0}' = 1 ]; then npm --prefix server run seed:demo; else npm --prefix server run seed; fi
